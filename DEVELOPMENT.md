@@ -59,7 +59,7 @@ secret paths yourself, MuSig2 included.
 Keep a `TRUST.md` table tracking each symbol's verification status: `ct-verified` (cleared
 the Phase 8 harness) vs `unverified`. "Verified" means it meets *this project's* bar, not
 that it's audited. Orthogonal to everything else: unaudited hand-rolled crypto should never
-guard real value — "treat as if used" is a discipline for how you build, not a licence to
+guard real value — "treat as if used" is a discipline for how you build, not a license to
 point it at real keys.
 
 ### 0.5 Distribution model — submodule now, `core:crypto` maybe later
@@ -152,7 +152,7 @@ surfaces and they must not be conflated:
   ```
 
   Headers are **hand-written to match the documented ABI**, not copied from upstream. Even
-  under a matching licence that keeps the header an honest statement of what *this*
+  under a matching license that keeps the header an honest statement of what *this*
   implementation guarantees rather than an inherited description of a different one.
   Upstream's headers are the specification being matched, and `#assert`s hold the struct
   sizes to it.
@@ -168,13 +168,13 @@ need one; the arithmetic packages are `contextless` and allocation-free, so most
 Since a C caller can pass anything, every `capi/` entry point validates its arguments
 through the illegal-argument callback rather than trusting them.
 
-**Licence: MIT**, © Galaxoid Labs — the same licence as upstream libsecp256k1, so anyone
+**License: MIT**, © Galaxoid Labs — the same license as upstream libsecp256k1, so anyone
 already vendoring that can swap this in without a licensing conversation.
 
 One consequence worth recording: Odin's `core` is BSD-3-Clause. MIT and BSD-3 are both
 permissive and compatible in the direction that matters, but a `core:crypto` submission
 would likely be asked to relicense for consistency with the rest of the tree. That is a
-conversation to have if and when the proposal is made, not a reason to pick a licence now.
+conversation to have if and when the proposal is made, not a reason to pick a license now.
 
 This is an independent implementation; upstream libsecp256k1 is used only as an oracle and
 as the source of the test corpus, and none of its code is incorporated.

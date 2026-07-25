@@ -5,7 +5,7 @@ functional parity with [`bitcoin-core/secp256k1`](https://github.com/bitcoin-cor
 
 > **Not for real value.** This is an educational project held to production standards.
 > Unaudited hand-rolled cryptography must never guard real keys or real funds. "Treat it
-> as if it were used" is a discipline for *how this is built*, not a licence to deploy it.
+> as if it were used" is a discipline for *how this is built*, not a license to deploy it.
 
 **Status:** all modules implemented — field, scalar, group, ecmult, hash, context, ECDSA,
 recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2 (BIP327).
@@ -147,11 +147,11 @@ odin run examples/ecdh
 See `TESTING.md` for the three test tiers and the traceability map against upstream's
 `tests.c`.
 
-## Licence
+## License
 
 MIT, © Galaxoid Labs. See `LICENSE`.
 
-The same licence upstream libsecp256k1 uses, which keeps this implementation drop-in
+The same license upstream libsecp256k1 uses, which keeps this implementation drop-in
 compatible for anyone already vendoring that.
 
 This is an independent implementation. Upstream libsecp256k1 is used in this repository

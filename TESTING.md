@@ -344,9 +344,19 @@ small order and `split_lambda` becomes plain modular arithmetic. This implementa
 reduced-order curve.
 
 The group-layer exhaustive tests pass at all three orders because they use no scalars at
-all. Closing the rest requires the `scalar_low` work tracked in `DEVELOPMENT.md`; until
-then, exhaustive coverage of `ecmult`, `ecdsa` and `schnorr` is unavailable, and no claim
-should be made that it exists.
+all — every ordered pair through all three addition formulas, 15 tests per order.
+
+Closing the rest means restructuring `scalar` (about 1,000 lines, with the 4x64 reduction
+structure baked into `scalar_mul.odin` in roughly 57 places) around a swappable modulus.
+That work is **not done**, and exhaustive coverage of `ecmult`, `ecdsa` and `schnorr` does
+not exist.
+
+Its priority dropped once the differential oracle landed. Exhaustive small-curve testing
+and fuzzed differential testing target the same layers by different means, and for
+`ecmult`/`ecdsa`/`schnorr` the oracle is arguably the stronger signal: it exercises the
+*real* 256-bit curve against a reference implementation rather than a reduced-order
+analogue. What exhaustive mode would still add uniquely is coverage of the degenerate group
+cases *inside* those higher layers. That remains a genuine gap.
 
 Worth noting: the invariant layer caught this. `gen_compute_table` asserts that its ladder
 result really is half the generator, and that assertion fired rather than silently building

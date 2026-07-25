@@ -1,5 +1,10 @@
 # TRUST.md — per-symbol verification status
 
+**Differential oracle: zero divergences.** Every symbol marked ✅ below in the "oracle"
+column has been compared byte-for-byte against upstream libsecp256k1 over thousands of
+fuzzed inputs. That is the strongest correctness evidence in this project — stronger than
+any hand-written vector, because the inputs are not chosen. It says nothing about timing.
+
 Two states, per `CLAUDE.md`:
 
 - **`unverified`** — correct on vectors, but not yet cleared by the constant-time harness.

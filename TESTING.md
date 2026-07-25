@@ -49,12 +49,33 @@ that structure and seed deterministically so failures reproduce.
 the C ABI shim exists in Phase 9. Until then the README claim is precisely "passes an Odin
 suite mirroring upstream's", never "passes libsecp256k1's tests".
 
-## Tier 3 — Strategy A: link the real upstream suite (Phase 9)
+## Tier 3 — Strategy A and the differential oracle (Phase 9)
 
-A thin C shim exposing this implementation's symbols under the C ABI, linked against the
-*actual* upstream `src/tests.c`, `src/tests_exhaustive.c`, and module tests. This is the
-only thing that makes "passes libsecp256k1's tests" strictly true. Plus differential
-fuzzing against the prebuilt `libsecp256k1.a` through the quarantined `oracle` package.
+Two separate things, and only one of them is done.
+
+**The differential oracle — ✅ running, zero divergences.** `tests/oracle` feeds identical
+fuzzed inputs to this implementation and to upstream libsecp256k1 through the quarantined
+`oracle` FFI package, and demands byte-identical output. Currently covering: secret-key
+validity, public-key derivation and serialization (both encodings), public-key parsing and
+tweaking, ECDSA signing (exact signature match, so RFC6979 and low-S are both pinned),
+verification verdicts on fuzzed blobs, DER serialization, Schnorr signing and verification,
+x-only keys and parity, ECDH, recoverable signatures and recovery, ellswift decoding, and
+tagged hashes.
+
+```sh
+./oracle/link-lib.sh /path/to/libsecp256k1.a     # once
+odin test tests/oracle/ -define:FUZZ_COUNT=2000
+```
+
+The library must be built with all modules enabled; the recovery module in particular is
+off in some default builds. `oracle/libsecp256k1.a` is gitignored and the `oracle` package
+is not reachable from any library package — verified by building every library package with
+the archive absent.
+
+**Strategy A linking — ❌ not done.** A thin C shim exposing this implementation's symbols
+under the C ABI, linked against the *actual* upstream `src/tests.c` and
+`src/tests_exhaustive.c`. Until that exists, the honest claim is "byte-identical to
+libsecp256k1 on fuzzed inputs", **not** "passes libsecp256k1's tests".
 
 ---
 

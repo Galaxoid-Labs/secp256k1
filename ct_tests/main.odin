@@ -14,7 +14,7 @@ precisely a secret-dependent branch or a secret-indexed load. Public outputs are
 re-marked as defined, and each such declassification is a claim that the value is safe to
 publish.
 
-	odin build ct_tests/ -debug -o:none -out:ct_tests.bin
+	./ct_tests/build.sh --valgrind
 	valgrind --error-exitcode=1 ./ct_tests.bin
 
 # Platform status
@@ -292,11 +292,15 @@ main :: proc() {
 		fmt.println()
 		fmt.println("  NO MEMORY CHECKER COMPILED IN — this run verifies nothing.")
 		fmt.println()
-		fmt.println("  Build against valgrind and run under it:")
-		fmt.println("      odin build ct_tests/ -debug -o:none -define:CT_VALGRIND=true")
+		fmt.println("  Build against a checker and run under it:")
+		fmt.println("      ./ct_tests/build.sh --valgrind")
 		fmt.println("      valgrind --error-exitcode=1 ./ct_tests.bin")
 		fmt.println()
-		fmt.println("  valgrind has no working macOS ARM64 port; use Linux or CI.")
+		fmt.println("  Needs the valgrind headers (Fedora: valgrind-devel).")
+		fmt.println("  valgrind has no macOS ARM64 port; use Linux or CI.")
+		fmt.println()
+		fmt.println("  A statistical timing test runs anywhere:")
+		fmt.println("      odin run ct_tests/ -o:speed -define:DUDECT=true")
 		fmt.println()
 		// Exit non-zero so this can never be mistaken for a passing gate.
 		os.exit(2)

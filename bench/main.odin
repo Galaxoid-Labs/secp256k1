@@ -59,7 +59,15 @@ timeit :: proc(iters: int, f: proc(i: int)) -> f64 {
 report :: proc(name: string, ours, c_time: f64) {
 	append(&results, Result{name, ours, c_time})
 	ratio := ours / c_time
-	fmt.printf("%-28s %10.3f %10.3f %7.2fx\n", name, ours, c_time, ratio)
+	// Odin's %10.3f zero-pads rather than space-pads, which reads badly in a table, so
+	// the number is formatted first and padded as a string.
+	fmt.printf(
+		"%-28s %10s %10s %8s\n",
+		name,
+		fmt.tprintf("%.3f", ours),
+		fmt.tprintf("%.3f", c_time),
+		fmt.tprintf("%.2fx", ratio),
+	)
 }
 
 // Shared fixtures.
@@ -186,7 +194,7 @@ main :: proc() {
 		total_ours += r.ours_us
 		total_c += r.c_us
 	}
-	fmt.printfln("aggregate ratio: %.2fx", total_ours / total_c)
+	fmt.printfln("aggregate: %.2fx of C", total_ours / total_c)
 	fmt.println()
 	fmt.println("Ratios below 1.00 are faster than C. On x86-64 upstream uses hand-written")
 	fmt.println("assembly for scalar reduction; on ARM64 it does not. Report the architecture.")

@@ -73,13 +73,14 @@ when params.EXHAUSTIVE_ORDER == 0 {
 Window size for the precomputed generator tables used by variable-time multiplication.
 
 Larger values trade memory for speed: the table holds `1 << (WINDOW_G - 2)` entries, and two
-such tables exist because of the endomorphism split. Upstream defaults to 15, giving about
-a megabyte; that is generated into a source file there but computed at startup here, so
-this implementation defaults lower and lets callers raise it.
+such tables exist because of the endomorphism split. 15 matches upstream and costs about a
+megabyte, built at startup here rather than vendored as generated source.
 
-Set with `-define:ECMULT_WINDOW_SIZE=n`, in the range [2, 24].
+Measured on ARM64, dropping to 12 costs roughly 20% on the verify paths and saves 0.9 MB,
+so the default follows upstream. Lower it with `-define:ECMULT_WINDOW_SIZE=n` where the
+memory matters more than verification throughput; the range is [2, 24].
 */
-ECMULT_WINDOW_SIZE :: #config(ECMULT_WINDOW_SIZE, 12)
+ECMULT_WINDOW_SIZE :: #config(ECMULT_WINDOW_SIZE, 15)
 
 #assert(
 	ECMULT_WINDOW_SIZE >= 2 && ECMULT_WINDOW_SIZE <= 24,

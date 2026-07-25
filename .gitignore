@@ -11,11 +11,12 @@
 *.exe
 *.dSYM/
 
-# Built binaries produced by the odin driver (named after the package dir)
-/secp256k1
-/ct_tests
-/precompute_ecmult
-/precompute_ecmult_gen
+# Built binaries produced by the odin driver, which names output after the package
+# directory. Anchor these to the .bin suffix the build scripts use — a bare `/ct_tests`
+# also matches the source directory of the same name and silently excludes it.
+/*.bin
+/ct_tests.bin
+/bench.bin
 
 # Test corpora are NOT vendored — see TESTING.md. Fetched here on demand.
 /vectors/

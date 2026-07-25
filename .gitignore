@@ -1,0 +1,27 @@
+# Odin build artifacts
+*.bin
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.pdb
+*.exe
+*.dSYM/
+
+# Built binaries produced by the odin driver (named after the package dir)
+/secp256k1
+/ct_tests
+/precompute_ecmult
+/precompute_ecmult_gen
+
+# Test corpora are NOT vendored — see TESTING.md. Fetched here on demand.
+/vectors/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp

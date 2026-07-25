@@ -285,7 +285,38 @@ is not yet implemented.
 | `xswiftec_frac_var` | unverified | ✅ | ✅ | agrees with the direct form |
 | `xswiftec_inv_var` | unverified | ✅ | ✅ | each solved branch decodes back |
 | `encode`, `elligatorswift_var` | unverified | ✅ | ✅ | round-trips; unlinkable across randomness |
-| `ellswift_xdh` | **not implemented** | — | — | needs `ecmult_const_xonly` |
+| `xdh`, `create` | unverified | ✅ | ✅ | symmetric; transcript-bound |
+
+`xdh` uses lift-and-`ecmult_const` rather than upstream's inversion-free `ecmult_const_xonly`
+ladder. Same result and same constant-time property for the secret scalar; one extra
+inversion and square root per exchange. Recorded rather than silent.
+
+## musig
+
+Phase 7. BIP327. `CLAUDE.md` names this the highest-risk code in the project, and it is the
+last symbol scheduled to reach `ct-verified`.
+
+| symbol | status | vectors | invariants | notes |
+|---|---|---|---|---|
+| `pubkey_agg` | unverified | ✅ | ✅ | coefficient-weighted; rogue-key resistance tested |
+| `keyaggcoef{,_internal}` | unverified | ✅ | ✅ | second-key coefficient fixed at 1 per spec |
+| `compute_pks_hash` | unverified | ✅ | ✅ | order-dependent by design |
+| `pubkey_sort` | unverified | ✅ | ✅ | makes aggregation canonical |
+| `pubkey_xonly_tweak_add`, `pubkey_ec_tweak_add` | unverified | ✅ | ✅ | maintains `tweak` and `parity_acc` |
+| `nonce_gen` | unverified | ✅ | ✅ | **session id must never repeat** |
+| `nonce_agg`, `nonce_process` | unverified | ✅ | ✅ | binding coefficient b |
+| **`partial_sign`** | unverified | ✅ | ✅ | wipes the secnonce first; reuse tested impossible |
+| `partial_sig_verify` | unverified | ✅ | ✅ | attributes failure to a specific signer |
+| `partial_sig_agg` | unverified | ✅ | ✅ | includes the tweak contribution |
+| `secnonce_clear` | unverified | ✅ | ✅ | for abandoned sessions |
+
+Four security mutations were injected and all four failed the suite: removing the nonce
+wipe, forcing every aggregation coefficient to 1 (the rogue-key attack), dropping the
+binding coefficient (the Wagner attack), and skipping the parity negation.
+
+**Not yet run against the BIP327 test vectors.** The end-to-end property is verified against
+the real BIP340 verifier, and the security properties are tested directly, but the official
+vector corpus is Phase 9 work. Until it runs, do not claim BIP327 conformance.
 
 ## params
 
@@ -297,4 +328,5 @@ Configuration only; no runtime behaviour, no secrets.
 
 ## Not yet started
 
-`musig` (BIP327). `ellswift` is present except for `ellswift_xdh`.
+Every module in the plan now has an implementation. What remains is verification:
+the Phase 8 constant-time harness and the Phase 9 vector corpora and differential oracle.

@@ -20,3 +20,4 @@ package tests
 @(require) import _ "./schnorr"
 @(require) import _ "./ecdh_recovery"
 @(require) import _ "./ellswift"
+@(require) import _ "./musig"

@@ -220,3 +220,71 @@ test_ellswift_fraction_matches_direct :: proc(t: ^testing.T) {
 		testing.expectf(t, quotient.n == direct.n, "the fraction and direct forms disagree (%d)", i)
 	}
 }
+
+/*
+BIP324 x-only ECDH over encoded keys.
+
+The property is the same as ordinary ECDH — both parties derive the same secret — but with
+the transcript binding that makes replay across sessions produce a different secret.
+*/
+@(test)
+test_ellswift_xdh_is_symmetric :: proc(t: ^testing.T) {
+	rng: testutil.Rand
+	testutil.rand_seed(&rng, TEST_SEED + 4)
+
+	gen: ecmult.Ecmult_Gen_Context
+	ecmult.ecmult_gen_context_build(&gen)
+
+	for i in 0 ..< params.COUNT {
+		a32, b32: [32]u8
+		testutil.rand_bytes(&rng, a32[:])
+		testutil.rand_bytes(&rng, b32[:])
+
+		ell_a, ell_b: [64]u8
+		if !ellswift.create(&gen, &ell_a, &a32) || !ellswift.create(&gen, &ell_b, &b32) {
+			continue
+		}
+
+		// Alice is party true (her encoding is ell_a), Bob is party false.
+		sa, sb: [32]u8
+		testing.expectf(t, ellswift.xdh(sa[:], &ell_a, &ell_b, &a32, true), "xdh failed for a (%d)", i)
+		testing.expectf(t, ellswift.xdh(sb[:], &ell_a, &ell_b, &b32, false), "xdh failed for b (%d)", i)
+		testing.expectf(t, sa == sb, "ellswift XDH is not symmetric (%d)", i)
+
+		// Swapping the transcript order must change the secret: the encodings are hashed
+		// in the given order, so the binding is order-sensitive by design.
+		sc: [32]u8
+		ellswift.xdh(sc[:], &ell_b, &ell_a, &a32, false)
+		testing.expectf(t, sc != sa, "transcript order did not affect the secret (%d)", i)
+
+		// A third party gets a different secret.
+		c32: [32]u8
+		testutil.rand_bytes(&rng, c32[:])
+		ell_c: [64]u8
+		if ellswift.create(&gen, &ell_c, &c32) {
+			sd: [32]u8
+			ellswift.xdh(sd[:], &ell_a, &ell_c, &a32, true)
+			testing.expectf(t, sd != sa, "a different peer produced the same secret (%d)", i)
+		}
+
+		// The encoded key must decode to the key the secret actually derives.
+		decoded: group.Ge
+		ellswift.decode(&decoded, &ell_a)
+		sec: scalar.Scalar
+		scalar.scalar_set_b32_seckey(&sec, &a32)
+		expected: group.Ge
+		eckey.pubkey_create(&gen, &expected, &sec)
+		testing.expectf(t, group.ge_eq_var(&decoded, &expected), "create produced the wrong key (%d)", i)
+	}
+
+	// An invalid secret key must be rejected.
+	ell_a, ell_b: [64]u8
+	seed: [32]u8
+	seed[31] = 1
+	ellswift.create(&gen, &ell_a, &seed)
+	ellswift.create(&gen, &ell_b, &seed)
+	zero: [32]u8
+	out: [32]u8
+	testing.expect(t, !ellswift.xdh(out[:], &ell_a, &ell_b, &zero, true), "a zero secret key was accepted")
+	testing.expect(t, !ellswift.create(&gen, &ell_a, &zero), "create accepted a zero secret key")
+}

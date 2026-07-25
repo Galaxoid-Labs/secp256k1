@@ -10,8 +10,9 @@ functional parity with [`bitcoin-core/secp256k1`](https://github.com/bitcoin-cor
 **Status:** all modules implemented — field, scalar, group, ecmult, hash, context, ECDSA,
 recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2 (BIP327).
 
-81 tests pass in release and `-debug`, and the differential oracle reports **zero
-divergences** from libsecp256k1 across thousands of fuzzed inputs.
+81 tests pass in release and `-debug`, the differential oracle reports **zero divergences**
+from libsecp256k1 across thousands of fuzzed inputs, and performance is within ~1% of the C
+reference on ARM64 — see [Performance](#performance).
 
 **Every symbol is still `unverified`.** The Phase 8 constant-time harness is built but
 cannot run on macOS ARM64 (no valgrind port), so nothing is `ct-verified`. See `TRUST.md`.
@@ -82,6 +83,39 @@ odin build capi/ -build-mode:static -o:speed    # .a
 ```
 
 Headers are in `capi/include/`, hand-written to match the documented ABI.
+
+## Performance
+
+Benchmarked side by side with libsecp256k1 in the same process, on identical inputs, via
+the `oracle` FFI. Ratios below 1.00 are faster than C.
+
+| operation | odin µs | c µs | ratio |
+|---|---:|---:|---:|
+| `ec_pubkey_create` | 12.65 | 13.45 | **0.94×** |
+| `schnorrsig_sign` | 13.68 | 14.49 | **0.94×** |
+| `ecdsa_sign` | 20.19 | 20.35 | **0.99×** |
+| `ecdh` | 27.85 | 27.31 | 1.02× |
+| `ecdsa_verify` | 24.26 | 23.08 | 1.05× |
+| `schnorrsig_verify` | 24.40 | 23.15 | 1.05× |
+| **aggregate** | | | **1.01×** |
+
+Apple silicon (Darwin/arm64), 20,000 iterations per operation, `-o:speed`.
+
+**Report the architecture with any figure.** On x86-64 upstream enables hand-written
+assembly for the scalar reduction, so the comparison there is Odin-vs-asm for scalar work
+and Odin-vs-C elsewhere. On ARM64 upstream ships no assembly and every comparison is
+Odin-vs-C. Only ARM64 has been measured.
+
+Reproduce with:
+
+```sh
+./oracle/link-lib.sh /path/to/libsecp256k1.a
+./bench/run.sh -define:ITERS=20000
+```
+
+`bench/micro` breaks the operations into their components — field primitives, point
+arithmetic, wNAF, hashing — which is how the two largest wins above were located rather
+than guessed at.
 
 ## Requirements
 

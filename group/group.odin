@@ -120,7 +120,7 @@ gej_verify :: #force_inline proc "contextless" (a: ^Gej, loc := #caller_location
 /*
 Sets r to the point with the given coordinates. No curve check is performed.
 */
-ge_set_xy :: proc "contextless" (r: ^Ge, x: ^field.Field_Elem, y: ^field.Field_Elem) {
+ge_set_xy :: #force_inline proc "contextless" (r: ^Ge, x: ^field.Field_Elem, y: ^field.Field_Elem) {
 	when VERIFY {
 		field.fe_verify(x)
 		field.fe_verify(y)
@@ -155,7 +155,7 @@ gej_set_infinity :: proc "contextless" (r: ^Gej) {
 /*
 Reports whether a is the point at infinity.
 */
-ge_is_infinity :: proc "contextless" (a: ^Ge) -> bool {
+ge_is_infinity :: #force_inline proc "contextless" (a: ^Ge) -> bool {
 	ge_verify(a)
 	return a.infinity
 }
@@ -163,7 +163,7 @@ ge_is_infinity :: proc "contextless" (a: ^Ge) -> bool {
 /*
 Reports whether a is the point at infinity.
 */
-gej_is_infinity :: proc "contextless" (a: ^Gej) -> bool {
+gej_is_infinity :: #force_inline proc "contextless" (a: ^Gej) -> bool {
 	gej_verify(a)
 	return a.infinity
 }
@@ -185,7 +185,7 @@ gej_clear :: proc "contextless" (r: ^Gej) {
 /*
 Sets r to -a, the point mirrored across the x axis.
 */
-ge_neg :: proc "contextless" (r: ^Ge, a: ^Ge) {
+ge_neg :: #force_inline proc "contextless" (r: ^Ge, a: ^Ge) {
 	ge_verify(a)
 	r^ = a^
 	field.fe_normalize_weak(&r.y)
@@ -196,7 +196,7 @@ ge_neg :: proc "contextless" (r: ^Ge, a: ^Ge) {
 /*
 Sets r to -a.
 */
-gej_neg :: proc "contextless" (r: ^Gej, a: ^Gej) {
+gej_neg :: #force_inline proc "contextless" (r: ^Gej, a: ^Gej) {
 	gej_verify(a)
 	r.infinity = a.infinity
 	r.x = a.x
@@ -210,7 +210,7 @@ gej_neg :: proc "contextless" (r: ^Gej, a: ^Gej) {
 /*
 Lifts an affine point into Jacobian coordinates with Z = 1.
 */
-gej_set_ge :: proc "contextless" (r: ^Gej, a: ^Ge) {
+gej_set_ge :: #force_inline proc "contextless" (r: ^Gej, a: ^Ge) {
 	ge_verify(a)
 	r.infinity = a.infinity
 	r.x = a.x
@@ -224,7 +224,7 @@ Sets r to the affine form of the Jacobian point (a.x, a.y, 1/zi).
 
 `a` must not be infinity, and zi must be the inverse of a's Z coordinate.
 */
-ge_set_gej_zinv :: proc "contextless" (r: ^Ge, a: ^Gej, zi: ^field.Field_Elem) {
+ge_set_gej_zinv :: #force_inline proc "contextless" (r: ^Ge, a: ^Gej, zi: ^field.Field_Elem) {
 	gej_verify(a)
 	when VERIFY {
 		field.fe_verify(zi)
@@ -244,7 +244,7 @@ ge_set_gej_zinv :: proc "contextless" (r: ^Ge, a: ^Gej, zi: ^field.Field_Elem) {
 /*
 Rescales an affine point by a Z inverse, as `ge_set_gej_zinv` but from affine input.
 */
-ge_set_ge_zinv :: proc "contextless" (r: ^Ge, a: ^Ge, zi: ^field.Field_Elem) {
+ge_set_ge_zinv :: #force_inline proc "contextless" (r: ^Ge, a: ^Ge, zi: ^field.Field_Elem) {
 	ge_verify(a)
 	when VERIFY {
 		field.fe_verify(zi)

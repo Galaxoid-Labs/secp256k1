@@ -16,7 +16,7 @@ Adds a into r.
 The sum of the two magnitudes must not exceed 32. On output r has magnitude equal to that
 sum and is not normalized.
 */
-fe_add :: proc "contextless" (r: ^Field_Elem, a: ^Field_Elem) {
+fe_add :: #force_inline proc "contextless" (r: ^Field_Elem, a: ^Field_Elem) {
 	fe_verify(r)
 	fe_verify(a)
 	when VERIFY {
@@ -42,7 +42,7 @@ Adds a small non-negative integer to r.
 `a` must be in [0, 0x7fff]. On output r's magnitude has grown by 1 and it is not
 normalized.
 */
-fe_add_int :: proc "contextless" (r: ^Field_Elem, a: u32) {
+fe_add_int :: #force_inline proc "contextless" (r: ^Field_Elem, a: u32) {
 	fe_verify(r)
 	CHECK(a <= 0x7fff, "fe_add_int: value out of range")
 	when VERIFY {
@@ -68,7 +68,7 @@ output r has magnitude m+1 and is not normalized.
 Passing an m smaller than a's actual magnitude produces a wrong result rather than a
 detected error in release builds, so the bound is asserted under `-debug`.
 */
-fe_negate :: proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, m: int) {
+fe_negate :: #force_inline proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, m: int) {
 	fe_verify(a)
 	CHECK(m >= 0 && m <= 31, "fe_negate: magnitude bound out of range")
 	fe_verify_magnitude(a, m)
@@ -98,7 +98,7 @@ Multiplies r by a small non-negative integer.
 `a` must be in [0, 32], and r's magnitude times a must not exceed 32. On output r's
 magnitude is multiplied by a and it is not normalized.
 */
-fe_mul_int :: proc "contextless" (r: ^Field_Elem, a: u32) {
+fe_mul_int :: #force_inline proc "contextless" (r: ^Field_Elem, a: u32) {
 	fe_verify(r)
 	CHECK(a <= 32, "fe_mul_int: multiplier out of range")
 	when VERIFY {
@@ -127,7 +127,7 @@ even value. On output r has magnitude floor(m/2) + 1 where m was the input magni
 The mask is derived from the low bit arithmetically rather than by branching, so this is
 safe on secret data.
 */
-fe_half :: proc "contextless" (r: ^Field_Elem) {
+fe_half :: #force_inline proc "contextless" (r: ^Field_Elem) {
 	fe_verify(r)
 
 	t0, t1, t2, t3, t4 := r.n[0], r.n[1], r.n[2], r.n[3], r.n[4]
@@ -169,7 +169,7 @@ Sets r to a if flag is true, and leaves r unchanged otherwise, in constant time.
 On output r's magnitude is the larger of the two inputs', and it is normalized only if
 both inputs were.
 */
-fe_cmov :: proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, flag: bool) {
+fe_cmov :: #force_inline proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, flag: bool) {
 	when VERIFY {
 		fe_verify(a)
 	}

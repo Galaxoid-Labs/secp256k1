@@ -114,6 +114,8 @@ sig_verify :: proc "contextless" (
 	pubkey: ^group.Ge,
 	message: ^scalar.Scalar,
 ) -> bool {
+	ensure_init()
+
 	if scalar.scalar_is_zero(&sig.r) || scalar.scalar_is_zero(&sig.s) {
 		return false
 	}
@@ -183,6 +185,21 @@ above which there is no second candidate to test.
 @(private)
 P_MINUS_ORDER: field.Field_Elem
 
+@(private)
+constants_ready: bool
+
+/*
+Builds the verification constants if they have not been built yet. Idempotent; see
+`group.ensure_init`.
+*/
+ensure_init :: proc "contextless" () {
+	if constants_ready {
+		return
+	}
+	init_constants()
+	constants_ready = true
+}
+
 @(init, private)
 init_constants :: proc "contextless" () {
 	ORDER_AS_FE = field.fe_const(
@@ -195,6 +212,7 @@ init_constants :: proc "contextless" () {
 	)
 	ORDER_AS_FE_PUB = ORDER_AS_FE
 	P_MINUS_ORDER_PUB = P_MINUS_ORDER
+	constants_ready = true
 }
 
 /*

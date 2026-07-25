@@ -48,6 +48,20 @@ cube root of unity.
 */
 C1, C2, C3, C4: field.Field_Elem
 
+@(private)
+constants_ready: bool
+
+/*
+Builds the ElligatorSwift constants if they have not been built yet. Idempotent; see
+`group.ensure_init`.
+*/
+ensure_init :: proc "contextless" () {
+	if constants_ready {
+		return
+	}
+	init_constants()
+}
+
 @(init, private)
 init_constants :: proc "contextless" () {
 	C1 = field.fe_const(
@@ -66,6 +80,7 @@ init_constants :: proc "contextless" () {
 		0x851695d4, 0x9a83f8ef, 0x919bb861, 0x53cbcb16,
 		0x630fb68a, 0xed0a766a, 0x3ec693d6, 0x8e6afa41,
 	)
+	constants_ready = true
 }
 
 /*
@@ -80,6 +95,8 @@ xswiftec_frac_var :: proc "contextless" (
 	u: ^field.Field_Elem,
 	t: ^field.Field_Elem,
 ) {
+	ensure_init()
+
 	u1, s, g, p, d, n, l: field.Field_Elem
 
 	u1 = u^

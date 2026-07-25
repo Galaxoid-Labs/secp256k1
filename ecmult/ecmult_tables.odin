@@ -124,10 +124,30 @@ defer_free_gej_buffer :: #force_inline proc "contextless" (_: []group.Gej) {}
 @(private)
 defer_free_ge_buffer :: #force_inline proc "contextless" (_: []group.Ge) {}
 
-@(init, private)
-init_tables :: proc "contextless" () {
+@(private)
+tables_ready: bool
+
+/*
+Builds the generator tables if they have not been built yet.
+
+See `group.ensure_init` for why this exists: `@(init)` does not run when the library is
+linked into a C program, so every entry point must be able to trigger initialization.
+Idempotent.
+*/
+ensure_init :: proc "contextless" () {
+	if tables_ready {
+		return
+	}
+	group.ensure_init()
 	g := group.GENERATOR
 	compute_two_tables(PRE_G[:], PRE_G_128[:], &g)
+	gen_compute_table(&PREC_TABLE, &g)
+	tables_ready = true
+}
+
+@(init, private)
+init_tables :: proc "contextless" () {
+	ensure_init()
 }
 
 /*

@@ -7,8 +7,14 @@ functional parity with [`bitcoin-core/secp256k1`](https://github.com/bitcoin-cor
 > Unaudited hand-rolled cryptography must never guard real keys or real funds. "Treat it
 > as if it were used" is a discipline for *how this is built*, not a licence to deploy it.
 
-**Status:** in development. See `DEVELOPMENT.md` for the phase plan and `TRUST.md` for
-per-symbol verification status.
+**Status:** all modules implemented — field, scalar, group, ecmult, hash, context, ECDSA,
+recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2 (BIP327).
+
+81 tests pass in release and `-debug`, and the differential oracle reports **zero
+divergences** from libsecp256k1 across thousands of fuzzed inputs.
+
+**Every symbol is still `unverified`.** The Phase 8 constant-time harness is built but
+cannot run on macOS ARM64 (no valgrind port), so nothing is `ct-verified`. See `TRUST.md`.
 
 ## Install
 
@@ -85,10 +91,23 @@ Headers are in `capi/include/`, hand-written to match the documented ABI.
 ## Building and testing
 
 ```sh
-odin build . -o:speed                       # release build
-odin test  . -all-packages                  # full suite
-odin test  . -all-packages -debug           # with internal *_verify invariants on
-odin test  . -define:EXHAUSTIVE_ORDER=13    # exhaustive small-order curve tests
+odin test tests/ -all-packages              # full suite
+odin test tests/ -all-packages -debug       # with the internal *_verify invariants on
+odin test tests/group/ -debug -define:EXHAUSTIVE_ORDER=13   # exhaustive small-order curve
+
+./oracle/link-lib.sh /path/to/libsecp256k1.a   # once, for the next two
+odin test tests/oracle/ -define:FUZZ_COUNT=2000            # differential vs C
+./bench/run.sh                                             # benchmarks vs C
+
+./ct_tests/build.sh --valgrind && valgrind --error-exitcode=1 ./ct_tests.bin
+```
+
+Examples mirroring upstream's:
+
+```sh
+odin run examples/ecdsa
+odin run examples/schnorr
+odin run examples/ecdh
 ```
 
 See `TESTING.md` for the three test tiers and the traceability map against upstream's

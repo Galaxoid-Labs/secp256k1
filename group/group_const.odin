@@ -25,8 +25,21 @@ The generator in Jacobian coordinates.
 */
 GENERATOR_J: Gej
 
-@(init, private)
-init_generator :: proc "contextless" () {
+@(private)
+generator_ready: bool
+
+/*
+Builds the generator constants if they have not been built yet.
+
+`@(init)` procedures run only when the Odin runtime starts the program. When this library
+is linked into a **C** program through `capi/`, that never happens — so every entry point
+that depends on a precomputed value must be able to trigger initialization itself. Calling
+this repeatedly is harmless.
+*/
+ensure_init :: proc "contextless" () {
+	if generator_ready {
+		return
+	}
 	w := params.GENERATOR
 
 	x := field.fe_const(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7])
@@ -34,4 +47,10 @@ init_generator :: proc "contextless" () {
 
 	ge_set_xy(&GENERATOR, &x, &y)
 	gej_set_ge(&GENERATOR_J, &GENERATOR)
+	generator_ready = true
+}
+
+@(init, private)
+init_generator :: proc "contextless" () {
+	ensure_init()
 }

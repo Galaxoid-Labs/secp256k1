@@ -280,9 +280,33 @@ justification.
 valgrind --error-exitcode=1 ./ct_tests.bin
 ```
 
-**It cannot verify anything on macOS ARM64.** valgrind has no working port for that target,
-and Odin does not expose MSan instrumentation for its runtime, so neither backend is
-available on the development machine. Run it on Linux or in CI.
+**The memory-checker route cannot run on macOS ARM64.** Verified rather than assumed:
+`brew install valgrind` refuses with "Linux is required for this software", and clang
+rejects `-fsanitize=memory` for `arm64-apple-darwin`. Run that route on Linux or in CI.
+
+**A statistical timing test runs everywhere and is currently clean:**
+
+```sh
+odin run ct_tests/ -o:speed -define:DUDECT=true
+```
+
+dudect-style (Reparaz/Balasch/Verbauwhede, DATE 2017): time each operation with a fixed
+secret and with a random one, interleaved, and apply Welch's t-test. All five measured
+paths score |t| < 2.0 against a threshold of 10.
+
+The test is **validated by injection**, which is the only way to trust a negative result:
+
+| injected leak | functional suite | differential oracle | dudect |
+|---|---|---|---|
+| ECDH uses variable-time `ecmult` | passes | passes | **\|t\| = 20.2** |
+| ECDSA branches on secret parity | passes | passes | **\|t\| = 44.2** |
+
+Both leaks are invisible to every other test in this project. That is the whole argument
+for Phase 8 existing, demonstrated rather than asserted.
+
+It bounds rather than proves: a negative result means no leak was detected at this sample
+size on this machine, and it cannot see leaks that never reach wall-clock time. valgrind
+remains the gate for `ct-verified`.
 
 The harness **exits 2 rather than 0 when no checker is compiled in**. A constant-time test
 that silently verifies nothing is worse than no test, because it produces a green result

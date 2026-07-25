@@ -19,9 +19,21 @@ Public-data paths — verify, recovery, ellswift decode, key and address derivat
 Secret paths stay `unverified` until the Phase 8 harness clears them. MuSig2 signing is the
 last to graduate, and its nonce handling is the highest-risk code in the project.
 
-**Phase 8 blocker:** the harness as specced runs valgrind, which has no working macOS
-ARM64 port. Resolve before Phase 8 (Linux container, CI-only CT verification, or revisit
-MSan). Until then no symbol can legitimately reach `ct-verified`, and none below claims to.
+**Constant-time status.** Two independent checks:
+
+1. **Statistical timing test (dudect) — runs here, currently clean.** All five measured
+   secret paths show |t| < 2.0 against a threshold of 10 at 20,000 samples per class. The
+   test is validated by injection: a variable-time ECDH multiply scores |t| = 20.2 and a
+   secret-dependent branch in ECDSA scores |t| = 44.2, while both pass the entire functional
+   suite *and* the differential oracle.
+
+2. **valgrind / MSan instruction-level check — cannot run on this platform.** valgrind has
+   no macOS ARM64 port (`brew install` refuses: "Linux is required") and clang rejects
+   `-fsanitize=memory` for `arm64-apple-darwin`. Both were attempted, not assumed.
+
+`ct-verified` is granted only on (2), because only instruction-level checking can see leaks
+that do not show up as wall-clock time. Every symbol below therefore remains `unverified`
+— but the timing evidence is real, and it is the strongest available on this platform.
 
 ---
 

@@ -4,6 +4,8 @@
  * NOT FOR REAL VALUE. This is an educational implementation held to production standards.
  * Unaudited hand-rolled cryptography must never guard real keys or real funds.
  *
+ * Copyright (c) 2026 Galaxoid Labs. MIT licensed; see LICENSE.
+ *
  * Hand-written to match the documented ABI of libsecp256k1; no upstream code is
  * incorporated. Opaque struct sizes are identical to upstream's, so existing consumer
  * definitions remain valid.

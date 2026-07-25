@@ -149,8 +149,11 @@ See `TESTING.md` for the three test tiers and the traceability map against upstr
 
 ## Licence
 
-BSD-3-Clause. See `LICENSE`.
+MIT, © Galaxoid Labs. See `LICENSE`.
 
-This is an independent implementation. Upstream libsecp256k1 (MIT) is used in this
-repository only as a differential-testing oracle and as the source of the test corpus;
-no upstream code is incorporated.
+The same licence upstream libsecp256k1 uses, which keeps this implementation drop-in
+compatible for anyone already vendoring that.
+
+This is an independent implementation. Upstream libsecp256k1 is used in this repository
+only as a differential-testing oracle and as the source of the test corpus; no upstream
+code is incorporated.

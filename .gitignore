@@ -28,3 +28,7 @@
 
 # The differential oracle links a locally built libsecp256k1; never committed.
 /oracle/libsecp256k1.a
+
+# Compiled shim for the constant-time harness.
+/ct_tests/checkmem.o
+/ct_tests.bin

@@ -268,11 +268,25 @@ deliberate; revisit if Phase 9 tier 3 linking requires the symbols to exist.
 
 | upstream | Odin | tier 2 | tier 3 |
 |---|---|---|---|
-| `src/ctime_tests.c` | `ct_tests/` | — | — |
+| `src/ctime_tests.c` | `ct_tests/` | built ✅ | **cannot run here** |
 
-**Blocker to resolve before Phase 8:** the gate as written in `CLAUDE.md` runs valgrind,
-which has no working macOS ARM64 port. Options are a Linux container or VM, CI-only CT
-verification, or revisiting the MSan route. Decide before Phase 8 starts, not during it.
+The harness exists and exercises six secret paths — `pubkey_create`, `ecdsa.sign`,
+`schnorr.sign`, `ecdh`, `privkey_tweak_add`, and MuSig2 `nonce_gen` + `partial_sign` —
+marking secrets undefined and declassifying each published output with a stated
+justification.
+
+```sh
+./ct_tests/build.sh --valgrind
+valgrind --error-exitcode=1 ./ct_tests.bin
+```
+
+**It cannot verify anything on macOS ARM64.** valgrind has no working port for that target,
+and Odin does not expose MSan instrumentation for its runtime, so neither backend is
+available on the development machine. Run it on Linux or in CI.
+
+The harness **exits 2 rather than 0 when no checker is compiled in**. A constant-time test
+that silently verifies nothing is worse than no test, because it produces a green result
+that means nothing — so this failure mode is loud by construction.
 
 ---
 

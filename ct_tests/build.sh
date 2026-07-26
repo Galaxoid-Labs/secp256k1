@@ -31,7 +31,17 @@ esac
 
 cc -c $cflags -O1 -o "$dir/checkmem.o" "$dir/checkmem.c"
 
+# The internal `*_verify` layer must be OFF here. Those checks branch on field magnitudes
+# and limb values by design, so with them compiled in memcheck reports hundreds of contexts
+# that are invariant assertions, not leaks — drowning any real finding. Upstream builds
+# `ctime_tests.c` without `VERIFY` for the same reason. `-debug` is kept only for the DWARF
+# line numbers that make a finding actionable.
+#
 # `foreign import checkmem "checkmem.o"` links the object; do not repeat it here.
-odin build "$dir" -debug -o:none $odinflags -out:"$root/ct_tests.bin"
+# SECP256K1_DECLASSIFY turns on the library's declassification hook, which this harness
+# installs. Without it the library cannot tell the checker that a value has legitimately
+# become public, and every such point is reported as a leak.
+odin build "$dir" -debug -o:none -define:SECP256K1_VERIFY=false \
+    -define:SECP256K1_DECLASSIFY=true $odinflags -out:"$root/ct_tests.bin"
 
 echo "built $root/ct_tests.bin"

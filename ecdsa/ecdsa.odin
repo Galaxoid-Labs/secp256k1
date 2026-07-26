@@ -26,6 +26,7 @@ throughout, which is both faster and perfectly safe.
 */
 package ecdsa
 
+import "../ct"
 import "core:mem"
 import "../ecmult"
 import "../field"
@@ -95,13 +96,16 @@ sig_sign :: proc "contextless" (
 	// Normalize to low-S, so the signature is not malleable.
 	high := scalar.scalar_is_high(&sig.s)
 	scalar.scalar_cond_negate(&sig.s, high)
-	if recid != nil && high {
-		recid^ ~= 1
+	// Branch on the pointer (public) but never on `high` (secret-derived): folding it in
+	// arithmetically is what upstream's `*recid ^= high` does.
+	if recid != nil {
+		recid^ ~= int(high)
 	}
 
 	// r can only be zero if R.x = n exactly, which is as unreachable as the overflow
 	// case above.
-	return !scalar.scalar_is_zero(&sig.r) && !scalar.scalar_is_zero(&sig.s)
+	// Bitwise `&`: both halves must be evaluated unconditionally, as upstream does.
+	return !scalar.scalar_is_zero(&sig.r) & !scalar.scalar_is_zero(&sig.s)
 }
 
 /*
@@ -283,11 +287,14 @@ sign :: proc "contextless" (
 	extra_entropy: ^[32]u8 = nil,
 	recid: ^int = nil,
 ) -> bool {
+	// Whether the secret key is in range is itself secret and is never branched on: doing so
+	// would narrow the key's range to an observer. Instead a valid scalar is substituted so
+	// the loop below does identical work either way, and the flag is folded into the result
+	// only at the very end, after `ok` has finished being used as a branch condition. This
+	// is upstream's structure in `secp256k1_ecdsa_sign`, including its reasoning.
 	sec: scalar.Scalar
-	if !scalar.scalar_set_b32_seckey(&sec, seckey32) {
-		scalar.scalar_clear(&sec)
-		return false
-	}
+	is_sec_valid := scalar.scalar_set_b32_seckey(&sec, seckey32)
+	scalar.scalar_cmov(&sec, &scalar.ONE, !is_sec_valid)
 
 	msg: scalar.Scalar
 	scalar.scalar_set_b32(&msg, msg32)
@@ -301,10 +308,21 @@ sign :: proc "contextless" (
 
 		// A nonce at or above n, or zero, must be rejected rather than reduced: reducing
 		// would bias the distribution.
-		if !scalar.scalar_set_b32_seckey(&non, &nonce32) {
+		is_nonce_valid := scalar.scalar_set_b32_seckey(&non, &nonce32)
+
+		// Declassified so the retry can branch on it. The nonce itself stays secret; only
+		// the fact that RFC6979 produced an out-of-range one becomes public, and that
+		// happens with probability below 1 in 2^255.
+		ct.declassify(&is_nonce_valid, size_of(is_nonce_valid))
+		if !is_nonce_valid {
 			continue
 		}
-		if sig_sign(ctx, sig, &sec, &msg, &non, recid) {
+
+		signed := sig_sign(ctx, sig, &sec, &msg, &non, recid)
+		// The signature is published and so is whether signing succeeded, so both are
+		// public from here on.
+		ct.declassify(&signed, size_of(signed))
+		if signed {
 			ok = true
 			break
 		}
@@ -314,7 +332,9 @@ sign :: proc "contextless" (
 	scalar.scalar_clear(&non)
 	scalar.scalar_clear(&sec)
 	scalar.scalar_clear(&msg)
-	return ok
+
+	// Folded in last, deliberately: `is_sec_valid` is not declassified anywhere.
+	return ok & is_sec_valid
 }
 
 /*

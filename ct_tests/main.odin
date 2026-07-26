@@ -34,14 +34,17 @@ package ct_tests
 import "core:c"
 import "core:fmt"
 import "core:os"
+import "../ct"
 import "../ecdh"
 import "../ecdsa"
 import "../ecmult"
+import "../ellswift"
 import "../eckey"
 import "../extrakeys"
 import "../group"
 import "../musig"
 import "../scalar"
+import "../recovery"
 import "../schnorr"
 
 foreign import checkmem "checkmem.o"
@@ -147,6 +150,8 @@ test_schnorr_sign :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
 	kp: extrakeys.Keypair
 	created := extrakeys.keypair_create(gen, &kp, &seckey)
 	declassify(&created, size_of(created))
+	// The keypair's public half is published; only its secret half stays secret.
+	declassify(&kp.pubkey, size_of(kp.pubkey))
 
 	secret(&kp.seckey, size_of(kp.seckey))
 	secret(&aux, 32)
@@ -179,7 +184,13 @@ test_ecdh :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
 	pb: group.Ge
 	eckey.pubkey_create(gen, &pb, &sb)
 
-	// The peer's public key is public; our scalar is not.
+	// The peer's public key is public. It has to be declassified explicitly: it came out of
+	// a blinded `ecmult_gen`, so it carries the taint of the blinding seed even though the
+	// value itself is published. Upstream's ctime_tests declassifies pubkeys for the same
+	// reason.
+	declassify(&pb, size_of(pb))
+
+	// Our scalar is not public.
 	secret(&a, 32)
 
 	out: [32]u8
@@ -235,15 +246,22 @@ test_musig_partial_sign :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
 	kp: extrakeys.Keypair
 	created := extrakeys.keypair_create(gen, &kp, &seckey)
 	declassify(&created, size_of(created))
+	declassify(&kp.pubkey, size_of(kp.pubkey))
 
 	pk: group.Ge
 	extrakeys.keypair_pub(&pk, &kp)
+	// Every signer's public key is broadcast to the other signers, and key aggregation is
+	// deliberately variable-time in it.
+	declassify(&pk, size_of(pk))
 
 	agg_pk: extrakeys.Xonly_Pubkey
 	cache: musig.Keyagg_Cache
 	keys := []group.Ge{pk}
 	agged := musig.pubkey_agg(&agg_pk, &cache, keys)
 	declassify(&agged, size_of(agged))
+	// The aggregate key and the cache derived from it are published to all signers.
+	declassify(&agg_pk, size_of(agg_pk))
+	declassify(&cache, size_of(cache))
 
 	agg_pk32: [32]u8
 	extrakeys.xonly_pubkey_serialize(&agg_pk32, &agg_pk)
@@ -276,6 +294,149 @@ test_musig_partial_sign :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
 	check("musig.nonce_gen + partial_sign", gen_ok && sign_ok)
 }
 
+/*
+Keypair creation and the x-only keypair tweak used by BIP341 key-path spending.
+
+The tweak is the interesting one: it negates the secret key when the tweaked point has odd
+y, and that negation is on secret data.
+*/
+test_keypair_tweak :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
+	seckey: [32]u8
+	tweak: [32]u8
+	for i in 0 ..< 32 {
+		seckey[i] = u8(i + 19)
+		tweak[i] = u8(i * 3 + 5)
+	}
+	// The key is secret; the tweak is not. Upstream's ctime_tests states this outright —
+	// "The tweak is not treated as a secret in keypair_tweak_add" — and it is the right
+	// model: a BIP341 tweak is derived from the script tree, which is published when the
+	// output is spent. Marking it secret here would demand constant-time behaviour the API
+	// never promised and that upstream does not provide either.
+	secret(&seckey, 32)
+
+	kp: extrakeys.Keypair
+	created := extrakeys.keypair_create(gen, &kp, &seckey)
+	declassify(&created, size_of(created))
+	declassify(&kp.pubkey, size_of(kp.pubkey))
+
+	ok := extrakeys.keypair_xonly_tweak_add(&kp, &tweak)
+	// Whether the tweak produced a usable key is reported to the caller.
+	declassify(&ok, size_of(ok))
+	declassify(&kp.pubkey, size_of(kp.pubkey))
+
+	check("extrakeys.keypair_xonly_tweak_add", ok && created)
+}
+
+/*
+MuSig2 aggregate-key tweaking, both flavours.
+
+Separate from the signing case because the tweak accumulator carries a parity flag that is
+updated conditionally, and the aggregate key it operates on is public while the tweak may
+not be.
+*/
+test_musig_tweak :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
+	seckey: [32]u8
+	tweak: [32]u8
+	for i in 0 ..< 32 {
+		seckey[i] = u8(i + 23)
+		tweak[i] = u8(i * 5 + 3)
+	}
+
+	kp: extrakeys.Keypair
+	created := extrakeys.keypair_create(gen, &kp, &seckey)
+	declassify(&created, size_of(created))
+	declassify(&kp.pubkey, size_of(kp.pubkey))
+
+	pk: group.Ge
+	extrakeys.keypair_pub(&pk, &kp)
+	declassify(&pk, size_of(pk))
+
+	agg_pk: extrakeys.Xonly_Pubkey
+	cache: musig.Keyagg_Cache
+	agged := musig.pubkey_agg(&agg_pk, &cache, []group.Ge{pk})
+	declassify(&agged, size_of(agged))
+	declassify(&cache, size_of(cache))
+
+	// The tweak is public, for the same reason as in the keypair case above.
+	out: group.Ge
+	ok1 := musig.pubkey_xonly_tweak_add(&out, &cache, &tweak)
+	declassify(&ok1, size_of(ok1))
+	declassify(&out, size_of(out))
+
+	ok2 := musig.pubkey_ec_tweak_add(&out, &cache, &tweak)
+	declassify(&ok2, size_of(ok2))
+	declassify(&out, size_of(out))
+
+	check("musig.pubkey_{xonly,ec}_tweak_add", ok1 && ok2)
+}
+
+/*
+Recoverable ECDSA signing. Same secret material as ordinary signing, plus the recovery id,
+which is derived from the nonce point's parity and is published with the signature.
+*/
+test_recovery_sign :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
+	seckey: [32]u8
+	msg: [32]u8
+	for i in 0 ..< 32 {
+		seckey[i] = u8(i + 31)
+		msg[i] = u8(i * 7 + 11)
+	}
+	secret(&seckey, 32)
+
+	sig: recovery.Recoverable_Signature
+	ok := recovery.sign_recoverable(gen, &sig, &msg, &seckey)
+
+	// The signature and its recovery id are published together.
+	declassify(&sig, size_of(sig))
+	declassify(&ok, size_of(ok))
+
+	check("recovery.sign_recoverable", ok)
+}
+
+/*
+ellswift key encoding and the BIP324 x-only Diffie-Hellman.
+
+`create` derives a public key from a secret and encodes it so the result is
+indistinguishable from uniform bytes; `xdh` is the transport handshake's shared-secret step
+and is squarely a secret-scalar operation.
+*/
+test_ellswift :: proc(gen: ^ecmult.Ecmult_Gen_Context) {
+	sk_a: [32]u8
+	sk_b: [32]u8
+	aux: [32]u8
+	for i in 0 ..< 32 {
+		sk_a[i] = u8(i + 37)
+		sk_b[i] = u8(i + 41)
+		aux[i] = u8(i * 3 + 13)
+	}
+
+	// Build the peer's encoding with a key that is not marked secret, so only our own
+	// scalar is under test.
+	ell_b: [64]u8
+	made_b := ellswift.create(gen, &ell_b, &sk_b, &aux)
+	declassify(&made_b, size_of(made_b))
+	declassify(&ell_b, 64)
+
+	// The key is secret; the auxiliary randomness is not. Upstream's ctime_tests passes a
+	// previous ellswift encoding as aux — public data — and the encoder absorbs aux *after*
+	// the point at which the state stops being secret, so treating it as secret would demand
+	// constant-time behaviour from the deliberately variable-time encoder.
+	secret(&sk_a, 32)
+
+	ell_a: [64]u8
+	made_a := ellswift.create(gen, &ell_a, &sk_a, &aux)
+	// The encoding is published on the wire; that is its entire purpose.
+	declassify(&made_a, size_of(made_a))
+	declassify(&ell_a, 64)
+
+	shared: [32]u8
+	ok := ellswift.xdh(shared[:], &ell_a, &ell_b, &sk_a, false)
+	// The shared secret stays secret; only the success flag is published.
+	declassify(&ok, size_of(ok))
+
+	check("ellswift.create + xdh", made_a && made_b && ok)
+}
+
 main :: proc() {
 	when DUDECT {
 		run_dudect_suite()
@@ -306,6 +467,11 @@ main :: proc() {
 		os.exit(2)
 	}
 
+	// Let the library declassify its own legitimate publication points. Without this the
+	// checker reports every one of them — the validity of an RFC6979 nonce, Schnorr's R,
+	// the success flag — and those reports bury real findings.
+	ct.set_hook(declassify)
+
 	gen: ecmult.Ecmult_Gen_Context
 	ecmult.ecmult_gen_context_build(&gen)
 
@@ -324,6 +490,10 @@ main :: proc() {
 	test_ecdh(&gen)
 	test_seckey_tweak(&gen)
 	test_musig_partial_sign(&gen)
+	test_keypair_tweak(&gen)
+	test_musig_tweak(&gen)
+	test_recovery_sign(&gen)
+	test_ellswift(&gen)
 	fmt.println()
 
 	if failures > 0 {

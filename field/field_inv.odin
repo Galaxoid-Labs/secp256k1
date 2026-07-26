@@ -233,7 +233,9 @@ fe_sqrt :: proc "contextless" (r: ^Field_Elem, a: ^Field_Elem) -> bool {
 			// The only other possibility is that we found a root of -a.
 			fe_negate(&t1, &t1, 1)
 			fe_normalize_var(&t1)
-			CHECK(fe_equal(&t1, a), "fe_sqrt: result is a root of neither a nor -a")
+			when VERIFY {
+				CHECK(fe_equal(&t1, a), "fe_sqrt: result is a root of neither a nor -a")
+			}
 		}
 	}
 	return ret

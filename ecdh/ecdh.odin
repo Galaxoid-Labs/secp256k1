@@ -82,7 +82,9 @@ ecdh :: proc "contextless" (
 
 	s: scalar.Scalar
 	overflow := scalar.scalar_set_b32(&s, seckey32)
-	overflow ||= scalar.scalar_is_zero(&s)
+	// Bitwise `|`, never `||`: short-circuiting here would branch on whether the secret key
+	// overflowed. Both operands must always be evaluated.
+	overflow |= scalar.scalar_is_zero(&s)
 	// Substitute a valid scalar so the work below is identical either way.
 	scalar.scalar_cmov(&s, &scalar.ONE, overflow)
 
@@ -107,5 +109,6 @@ ecdh :: proc "contextless" (
 	group.ge_clear(&pt)
 	group.gej_clear(&res)
 
-	return ok && !overflow
+	// Bitwise `&`: `overflow` is secret-key-derived, so this must not short-circuit.
+	return ok & !overflow
 }

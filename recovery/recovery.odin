@@ -47,12 +47,13 @@ sign_recoverable :: proc "contextless" (
 	seckey32: ^[32]u8,
 	extra_entropy: ^[32]u8 = nil,
 ) -> bool {
+	// The recovery id is written unconditionally rather than behind a branch on success:
+	// `ecdsa.sign`'s result folds in secret-key validity, which is deliberately never
+	// declassified, so branching on it here would leak what `sign` took care not to.
 	recid: int
-	if !ecdsa.sign(ctx, &sig.sig, msg32, seckey32, extra_entropy, &recid) {
-		return false
-	}
+	ok := ecdsa.sign(ctx, &sig.sig, msg32, seckey32, extra_entropy, &recid)
 	sig.recid = recid
-	return true
+	return ok
 }
 
 /*

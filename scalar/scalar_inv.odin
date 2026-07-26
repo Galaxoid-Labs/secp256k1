@@ -11,6 +11,13 @@ Mirrors upstream's `scalar_4x64_impl.h` inversion and `scalar_impl.h` `split_lam
 package scalar
 
 import "../modinv"
+import "../params"
+
+// The 4x64 representation is compiled only for the real curve. Under
+// `-define:EXHAUSTIVE_ORDER=n` the whole scalar type is replaced by the single-word
+// implementation in `scalar_low.odin`, which mirrors upstream's `scalar_low_impl.h`.
+// Exactly one of the two is ever compiled.
+when params.EXHAUSTIVE_ORDER == 0 {
 
 /*
 The group order n in signed 62-bit limbs, with its inverse mod 2^62.
@@ -207,7 +214,9 @@ when VERIFY {
 		s: Scalar
 		scalar_mul(&s, &LAMBDA, r2)
 		scalar_add(&s, &s, r1)
-		CHECK(scalar_eq(&s, k), "split_lambda: r1 + lambda*r2 != k")
+		when VERIFY {
+			CHECK(scalar_eq(&s, k), "split_lambda: r1 + lambda*r2 != k")
+		}
 
 		buf1, buf2: [32]u8
 
@@ -240,4 +249,6 @@ when VERIFY {
 		}
 		return false
 	}
+}
+
 }

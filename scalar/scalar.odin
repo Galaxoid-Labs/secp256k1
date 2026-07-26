@@ -22,6 +22,12 @@ import "base:runtime"
 import "core:mem"
 import "../params"
 
+// The 4x64 representation is compiled only for the real curve. Under
+// `-define:EXHAUSTIVE_ORDER=n` the whole scalar type is replaced by the single-word
+// implementation in `scalar_low.odin`, which mirrors upstream's `scalar_low_impl.h`.
+// Exactly one of the two is ever compiled.
+when params.EXHAUSTIVE_ORDER == 0 {
+
 /*
 Number of limbs.
 */
@@ -52,26 +58,10 @@ N_H_2 :: 0xffff_ffff_ffff_ffff
 N_H_3 :: 0x7fff_ffff_ffff_ffff
 
 /*
-Whether internal invariant checks are compiled in. Follows `-debug`, matching `field`.
-*/
-VERIFY :: ODIN_DEBUG
-
-/*
 A scalar modulo n: four 64-bit limbs, little-endian, always reduced into [0, n).
 */
 Scalar :: struct {
 	d: [LIMBS]u64,
-}
-
-@(private)
-CHECK :: #force_inline proc "contextless" (
-	condition: bool,
-	message: string = "scalar invariant violated",
-	loc := #caller_location,
-) {
-	when VERIFY {
-		runtime.assert_contextless(condition, message, loc)
-	}
 }
 
 /*
@@ -149,7 +139,7 @@ Returns `count` bits of a starting at `offset`, where the range lies within a si
 */
 scalar_get_bits_limb32 :: proc "contextless" (a: ^Scalar, offset, count: uint) -> u32 {
 	scalar_verify(a)
-	CHECK(count > 0 && count <= 32, "scalar_get_bits_limb32: count out of range")
+	CHECK((count > 0) & (count <= 32), "scalar_get_bits_limb32: count out of range")
 	CHECK(
 		(offset + count - 1) >> 6 == offset >> 6,
 		"scalar_get_bits_limb32: range straddles a limb boundary",
@@ -166,7 +156,7 @@ callers rather than secret data.
 */
 scalar_get_bits_var :: proc "contextless" (a: ^Scalar, offset, count: uint) -> u32 {
 	scalar_verify(a)
-	CHECK(count > 0 && count <= 32, "scalar_get_bits_var: count out of range")
+	CHECK((count > 0) & (count <= 32), "scalar_get_bits_var: count out of range")
 	CHECK(offset + count <= 256, "scalar_get_bits_var: range past the end")
 
 	if (offset + count - 1) >> 6 == offset >> 6 {
@@ -241,7 +231,7 @@ scalar_add :: proc "contextless" (r: ^Scalar, a: ^Scalar, b: ^Scalar) -> u64 {
 	r.d[3] = u64(t); t >>= 64
 
 	overflow := u64(t) + u64(scalar_check_overflow(r))
-	CHECK(overflow == 0 || overflow == 1, "scalar_add: unexpected overflow value")
+	CHECK((overflow == 0) | (overflow == 1), "scalar_add: unexpected overflow value")
 	scalar_reduce(r, overflow)
 
 	scalar_verify(r)
@@ -301,10 +291,16 @@ scalar_set_b32 :: proc "contextless" (r: ^Scalar, b32: ^[32]u8) -> (overflowed: 
 Sets r from a 32-byte big-endian value, rejecting zero and out-of-range values.
 
 This is the secret-key validity rule: a key must be in [1, n).
+
+The combining operator is bitwise `&`, not `&&`, and that is load-bearing: `&&` short-circuits,
+so `scalar_is_zero` would run only when the value did not overflow, and the branch that
+decides it is a branch on secret-key-derived data. Upstream writes `(!overflow) &
+(!secp256k1_scalar_is_zero(r))` for exactly this reason. Both operands must always be
+evaluated.
 */
 scalar_set_b32_seckey :: proc "contextless" (r: ^Scalar, b32: ^[32]u8) -> bool {
 	overflowed := scalar_set_b32(r, b32)
-	return !overflowed && !scalar_is_zero(r)
+	return !overflowed & !scalar_is_zero(r)
 }
 
 /*
@@ -394,7 +390,7 @@ multiply a tracked sign by it.
 scalar_cond_negate :: proc "contextless" (r: ^Scalar, flag: bool) -> int {
 	scalar_verify(r)
 
-	mask := u64(0) - u64(flag)
+	mask := ct_mask(flag)
 	nonzero := u64(scalar_is_zero(r)) - 1
 
 	t := u128(r.d[0] ~ mask) + u128(u64(N_0 + 1) & mask)
@@ -459,8 +455,8 @@ Sets r to a if flag is true, leaving it unchanged otherwise, in constant time.
 scalar_cmov :: proc "contextless" (r: ^Scalar, a: ^Scalar, flag: bool) {
 	scalar_verify(a)
 
-	mask0 := u64(flag) + ~u64(0)
-	mask1 := ~mask0
+	mask1 := ct_mask(flag)
+	mask0 := ~mask1
 
 	r.d[0] = (r.d[0] & mask0) | (a.d[0] & mask1)
 	r.d[1] = (r.d[1] & mask0) | (a.d[1] & mask1)
@@ -519,3 +515,5 @@ write_be64 :: #force_inline proc "contextless" (b: []u8, v: u64) {
 // overkill but still correct: every value fits in limb 0. `params.EXHAUSTIVE_ORDER` is
 // consulted by the group and ecmult layers rather than here.
 #assert(params.EXHAUSTIVE_ORDER >= 0)
+
+}

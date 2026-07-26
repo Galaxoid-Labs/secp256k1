@@ -169,7 +169,10 @@ fe_normalizes_to_zero :: proc "contextless" (r: ^Field_Elem) -> bool {
 
 	CHECK(t4 >> 49 == 0, "fe_normalizes_to_zero: carry escaped the top limb")
 
-	return z0 == 0 || z1 == M52
+	// Bitwise `|`, never `||`. This is the constant-time variant; short-circuiting would
+	// make the second comparison conditional on the first, which is a branch on the value.
+	// Upstream writes `(z0 == 0) | (z1 == M52)` for the same reason.
+	return (z0 == 0) | (z1 == M52)
 }
 
 /*

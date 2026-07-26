@@ -10,6 +10,35 @@ Mirrors upstream's `field_5x52_impl.h`.
 */
 package field
 
+import "base:intrinsics"
+
+/*
+Turns a selection flag into a full-width mask: 0 when false, all ones when true.
+
+The volatile round-trip is not decoration. Written as plain arithmetic, LLVM recognizes the
+mask-select idiom, proves it equivalent to a select, and — inside a linear table scan like
+`ecmult_gen`'s — rewrites the whole scan back into "compare the index, branch, load only the
+matching entry". That reintroduces exactly the secret-dependent branch and secret-indexed
+load the scan exists to prevent, and no functional test can see it. Forcing the flag through
+memory as volatile denies the optimizer the equivalence.
+
+This mirrors upstream's `volatile int vflag = flag;`, which is there for the same reason.
+Note the barrier is on the *mask*, not on the flag: laundering only the flag is not enough,
+because LLVM still knows a bool-derived mask is either 0 or all-ones and specializes
+`a & mask` on that, sinking the load back into a branch. Loading the mask itself through
+volatile makes its value opaque, so both operands must be read unconditionally. Verified by
+disassembly, not by inspection.
+
+Do not "simplify" this to `u64(0) - u64(flag)`; the constant-time harness catches it, but
+only when run.
+*/
+@(private)
+ct_mask :: #force_inline proc "contextless" (flag: bool) -> u64 {
+	v: u64
+	intrinsics.volatile_store(&v, u64(0) - u64(flag))
+	return intrinsics.volatile_load(&v)
+}
+
 /*
 Adds a into r.
 
@@ -70,7 +99,7 @@ detected error in release builds, so the bound is asserted under `-debug`.
 */
 fe_negate :: #force_inline proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, m: int) {
 	fe_verify(a)
-	CHECK(m >= 0 && m <= 31, "fe_negate: magnitude bound out of range")
+	CHECK((m >= 0) & (m <= 31), "fe_negate: magnitude bound out of range")
 	fe_verify_magnitude(a, m)
 
 	// For every legal m these hold, so no limb of the subtraction can underflow.
@@ -174,9 +203,9 @@ fe_cmov :: #force_inline proc "contextless" (r: ^Field_Elem, a: ^Field_Elem, fla
 		fe_verify(a)
 	}
 
-	// Derived arithmetically so no branch depends on flag.
-	mask0 := u64(flag) + ~u64(0)
-	mask1 := ~mask0
+	// Derived arithmetically, through a volatile barrier, so no branch depends on flag.
+	mask1 := ct_mask(flag)
+	mask0 := ~mask1
 
 	r.n[0] = (r.n[0] & mask0) | (a.n[0] & mask1)
 	r.n[1] = (r.n[1] & mask0) | (a.n[1] & mask1)
@@ -273,8 +302,8 @@ fe_from_storage :: proc "contextless" (r: ^Field_Elem, a: ^Field_Storage) {
 Sets r to a if flag is true, and leaves r unchanged otherwise, in constant time.
 */
 fe_storage_cmov :: proc "contextless" (r: ^Field_Storage, a: ^Field_Storage, flag: bool) {
-	mask0 := u64(flag) + ~u64(0)
-	mask1 := ~mask0
+	mask1 := ct_mask(flag)
+	mask0 := ~mask1
 
 	r.n[0] = (r.n[0] & mask0) | (a.n[0] & mask1)
 	r.n[1] = (r.n[1] & mask0) | (a.n[1] & mask1)

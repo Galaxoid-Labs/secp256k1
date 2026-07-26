@@ -78,9 +78,9 @@ Trans2x2 :: struct {
 
 /*
 Whether internal invariant checks are compiled in. Follows `-debug`, matching the `field`
-package.
+package, and overridable the same way with `-define:SECP256K1_VERIFY=false`.
 */
-VERIFY :: ODIN_DEBUG
+VERIFY :: #config(SECP256K1_VERIFY, ODIN_DEBUG)
 
 @(private)
 CHECK :: #force_inline proc "contextless" (
@@ -215,7 +215,7 @@ divsteps_59 :: proc "contextless" (zeta_in: i64, f0, g0: u64, t: ^Trans2x2) -> i
 		v <<= 1
 
 		// Follows from the bound of 10*59 divsteps overall.
-		CHECK(zeta >= -591 && zeta <= 591, "divsteps_59: zeta out of range")
+		CHECK((zeta >= -591) & (zeta <= 591), "divsteps_59: zeta out of range")
 	}
 
 	t.u = transmute(i64)u
@@ -266,7 +266,7 @@ divsteps_62_var :: proc "contextless" (eta_in: i64, f0, g0: u64, t: ^Trans2x2) -
 		CHECK(u * f0 + v * g0 == f << uint(62 - i), "divsteps_62_var: u,v invariant broken")
 		CHECK(q * f0 + r * g0 == g << uint(62 - i), "divsteps_62_var: q,r invariant broken")
 		// Follows from the bound of 12*62 divsteps overall.
-		CHECK(eta >= -745 && eta <= 745, "divsteps_62_var: eta out of range")
+		CHECK((eta >= -745) & (eta <= 745), "divsteps_62_var: eta out of range")
 
 		m: u64
 		w: u64
@@ -281,13 +281,13 @@ divsteps_62_var :: proc "contextless" (eta_in: i64, f0, g0: u64, t: ^Trans2x2) -
 			// Cancel up to 6 bits of g at once, bounded by the steps left and by how
 			// long eta's sign will hold.
 			limit := i if i64(i) < eta + 1 else int(eta + 1)
-			CHECK(limit > 0 && limit <= 62, "divsteps_62_var: limit out of range")
+			CHECK((limit > 0) & (limit <= 62), "divsteps_62_var: limit out of range")
 			m = (max(u64) >> uint(64 - limit)) & 63
 			w = (f * g * (f * f - 2)) & m
 		} else {
 			// eta tends to be small here, so a cheaper formula cancelling 4 bits suffices.
 			limit := i if i64(i) < eta + 1 else int(eta + 1)
-			CHECK(limit > 0 && limit <= 62, "divsteps_62_var: limit out of range")
+			CHECK((limit > 0) & (limit <= 62), "divsteps_62_var: limit out of range")
 			m = (max(u64) >> uint(64 - limit)) & 15
 			w = f + (((f + 1) & 4) << 1)
 			w = (-w * g) & m
@@ -363,12 +363,12 @@ posdivsteps_62_var :: proc "contextless" (
 			jac ~= int((f & g) >> 1)
 
 			limit := i if i64(i) < eta + 1 else int(eta + 1)
-			CHECK(limit > 0 && limit <= 62, "posdivsteps_62_var: limit out of range")
+			CHECK((limit > 0) & (limit <= 62), "posdivsteps_62_var: limit out of range")
 			m = (max(u64) >> uint(64 - limit)) & 63
 			w = (f * g * (f * f - 2)) & m
 		} else {
 			limit := i if i64(i) < eta + 1 else int(eta + 1)
-			CHECK(limit > 0 && limit <= 62, "posdivsteps_62_var: limit out of range")
+			CHECK((limit > 0) & (limit <= 62), "posdivsteps_62_var: limit out of range")
 			m = (max(u64) >> uint(64 - limit)) & 15
 			w = f + (((f + 1) & 4) << 1)
 			w = (-w * g) & m

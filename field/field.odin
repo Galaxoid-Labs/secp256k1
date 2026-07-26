@@ -78,8 +78,14 @@ Whether magnitude and normalization bookkeeping is compiled in.
 Upstream gates this on its `VERIFY` define. Here it follows `-debug`, so
 `odin test . -debug` runs with the invariant layer active, matching the discipline in
 DEVELOPMENT.md that randomized runs happen with invariants on.
+
+`-define:SECP256K1_VERIFY=false` forces it off in a `-debug` build. That exists for one
+caller: the constant-time harness, which needs DWARF line numbers but must not compile in
+this layer, because the invariant checks branch on field values by design and every such
+branch is a false positive under memcheck. Upstream builds `ctime_tests.c` without
+`VERIFY` for exactly this reason. Do not use this flag to silence a failing check.
 */
-VERIFY :: ODIN_DEBUG
+VERIFY :: #config(SECP256K1_VERIFY, ODIN_DEBUG)
 
 when VERIFY {
 	/*
@@ -281,7 +287,7 @@ Normalized if and only if m == 0. Used by the tests to probe carry-propagation e
 mirrors upstream's `secp256k1_fe_get_bounds`.
 */
 fe_get_bounds :: proc "contextless" (r: ^Field_Elem, m: int) {
-	CHECK(m >= 0 && m <= 32, "fe_get_bounds: magnitude out of range")
+	CHECK((m >= 0) & (m <= 32), "fe_get_bounds: magnitude out of range")
 	limb := u64(M52) * 2 * u64(m)
 	top := u64(M48) * 2 * u64(m)
 	r.n = {limb, limb, limb, limb, top}

@@ -24,15 +24,17 @@ bounds can be checked by reading.
 */
 package group
 
-import "core:mem"
+import "base:intrinsics"
 import "base:runtime"
+import "core:mem"
 import "../field"
 import "../params"
 
 /*
-Whether internal invariant checks are compiled in. Follows `-debug`.
+Whether internal invariant checks are compiled in. Follows `-debug`, overridable with
+`-define:SECP256K1_VERIFY=false`; see the `field` package for why that override exists.
 */
-VERIFY :: ODIN_DEBUG
+VERIFY :: #config(SECP256K1_VERIFY, ODIN_DEBUG)
 
 /*
 Maximum magnitudes for affine and Jacobian coordinates.
@@ -60,7 +62,15 @@ multiplication engines.
 */
 Ge :: struct {
 	x, y:     field.Field_Elem,
-	infinity: bool,
+	/*
+	`b32`, not `bool`, so this occupies all four bytes of upstream's `int infinity`.
+
+	The two layouts agree on size and offset either way, but a 1-byte write into a struct
+	that C allocated leaves the upper three bytes holding whatever was on C's stack, and C
+	then reads a nonzero `int` for a point that is not at infinity. `csuite`'s C test caught
+	exactly that. Writing the full width is what makes the struct genuinely shareable.
+	*/
+	infinity: b32,
 }
 
 /*
@@ -68,7 +78,10 @@ A point in Jacobian coordinates: x = X/Z^2, y = Y/Z^3.
 */
 Gej :: struct {
 	x, y, z:  field.Field_Elem,
-	infinity: bool,
+	/*
+	`b32` for the same reason as `Ge.infinity`: it must fill upstream's `int`.
+	*/
+	infinity: b32,
 }
 
 /*
@@ -157,7 +170,7 @@ Reports whether a is the point at infinity.
 */
 ge_is_infinity :: #force_inline proc "contextless" (a: ^Ge) -> bool {
 	ge_verify(a)
-	return a.infinity
+	return bool(a.infinity)
 }
 
 /*
@@ -165,7 +178,7 @@ Reports whether a is the point at infinity.
 */
 gej_is_infinity :: #force_inline proc "contextless" (a: ^Gej) -> bool {
 	gej_verify(a)
-	return a.infinity
+	return bool(a.infinity)
 }
 
 /*
@@ -532,7 +545,9 @@ change residuosity, turns the test into "is xd*xn^3 + b*xd^4 a square" and avoid
 inversion.
 */
 ge_x_frac_on_curve_var :: proc "contextless" (xn: ^field.Field_Elem, xd: ^field.Field_Elem) -> bool {
-	CHECK(!field.fe_normalizes_to_zero_var(xd), "ge_x_frac_on_curve_var: denominator is zero")
+	when VERIFY {
+		CHECK(!field.fe_normalizes_to_zero_var(xd), "ge_x_frac_on_curve_var: denominator is zero")
+	}
 	#assert(CURVE_B <= 31)
 
 	r, t: field.Field_Elem
@@ -629,8 +644,12 @@ gej_rescale :: proc "contextless" (r: ^Gej, s: ^field.Field_Elem) {
 	gej_verify(r)
 	when VERIFY {
 		field.fe_verify(s)
+		// Inside the `when`, not passed to CHECK as an argument: Odin evaluates call
+		// arguments eagerly, so a bare `CHECK(!fe_normalizes_to_zero_var(s))` would run a
+		// variable-time routine on the blinding factor in every build. Only the optimizer
+		// removed it, and only at -o:speed.
+		CHECK(!field.fe_normalizes_to_zero_var(s), "gej_rescale: scale factor is zero")
 	}
-	CHECK(!field.fe_normalizes_to_zero_var(s), "gej_rescale: scale factor is zero")
 
 	zz: field.Field_Elem
 	field.fe_sqr(&zz, s)
@@ -643,6 +662,18 @@ gej_rescale :: proc "contextless" (r: ^Gej, s: ^field.Field_Elem) {
 }
 
 /*
+Turns a selection flag into a full-width mask: 0 when false, all ones when true.
+
+See the twin helper in the `field` package for why the volatile round-trip is load-bearing.
+*/
+@(private)
+ct_mask :: #force_inline proc "contextless" (flag: bool) -> u64 {
+	v: u64
+	intrinsics.volatile_store(&v, u64(0) - u64(flag))
+	return intrinsics.volatile_load(&v)
+}
+
+/*
 Sets r to a if flag is true, in constant time.
 */
 gej_cmov :: proc "contextless" (r: ^Gej, a: ^Gej, flag: bool) {
@@ -652,7 +683,9 @@ gej_cmov :: proc "contextless" (r: ^Gej, a: ^Gej, flag: bool) {
 	field.fe_cmov(&r.x, &a.x, flag)
 	field.fe_cmov(&r.y, &a.y, flag)
 	field.fe_cmov(&r.z, &a.z, flag)
-	r.infinity = bool(u8(r.infinity) ~ ((u8(r.infinity) ~ u8(a.infinity)) & u8(flag)))
+	// Laundered like the field masks: a raw `& u8(flag)` is an idiom LLVM can undo.
+	inf_mask := u8(ct_mask(flag))
+	r.infinity = b32(u8(r.infinity) ~ ((u8(r.infinity) ~ u8(a.infinity)) & inf_mask))
 
 	gej_verify(r)
 }

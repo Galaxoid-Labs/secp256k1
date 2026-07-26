@@ -169,17 +169,27 @@ pubkey_create :: proc "contextless" (
 	pub: ^group.Ge,
 	seckey: ^scalar.Scalar,
 ) -> bool {
-	if scalar.scalar_is_zero(seckey) {
-		return false
-	}
+	// Never branch on the key. A zero scalar is rejected, but the rejection is made by
+	// substituting a valid scalar and doing byte-for-byte identical work either way, so the
+	// timing does not depend on the secret. The returned flag is public — a caller is told
+	// whether its key was accepted — but it becomes public only after the uniform work is
+	// done. This mirrors upstream's `secp256k1_ec_pubkey_create_helper`, which cmovs
+	// `secp256k1_scalar_one` in on failure for the same reason.
+	//
+	// The old early return on `gej_is_infinity` is gone with it: for any scalar in [1, n)
+	// the result cannot be infinity, and the substituted scalar is in range by construction,
+	// so the check could only ever fire on the path that is already rejected.
+	valid := !scalar.scalar_is_zero(seckey)
+
+	s := seckey^
+	scalar.scalar_cmov(&s, &scalar.ONE, !valid)
 
 	pj: group.Gej
-	ecmult.ecmult_gen(ctx, &pj, seckey)
-	if group.gej_is_infinity(&pj) {
-		return false
-	}
+	ecmult.ecmult_gen(ctx, &pj, &s)
 	group.ge_set_gej(pub, &pj)
-	return true
+
+	scalar.scalar_clear(&s)
+	return valid
 }
 
 /*

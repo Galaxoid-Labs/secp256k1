@@ -410,9 +410,9 @@ gej_add_ge :: proc "contextless" (r: ^Gej, a: ^Gej, b: ^Ge) {
 	field.fe_half(&r.y) // Y3 = -(...)/2                         ((GEJ_Y_M+3)/2 + 1)
 
 	// If a was infinity, replace the garbage with (b.x, b.y, 1).
-	field.fe_cmov(&r.x, &b.x, a.infinity)
-	field.fe_cmov(&r.y, &b.y, a.infinity)
-	field.fe_cmov(&r.z, &field.ONE, a.infinity)
+	field.fe_cmov(&r.x, &b.x, bool(a.infinity))
+	field.fe_cmov(&r.y, &b.y, bool(a.infinity))
+	field.fe_cmov(&r.z, &field.ONE, bool(a.infinity))
 
 	// r is infinity exactly when Z3 is zero.
 	//
@@ -423,7 +423,7 @@ gej_add_ge :: proc "contextless" (r: ^Gej, a: ^Gej, b: ^Ge) {
 	// degenerate holds and r.z = (x1 - x2)*Z, so r is infinity exactly when x1 = x2, that
 	// is when a = -b. When y1 != -y2 we cannot have a = -b, and r.z = (y1 + y2)*Z is
 	// non-zero.
-	r.infinity = field.fe_normalizes_to_zero(&r.z)
+	r.infinity = b32(field.fe_normalizes_to_zero(&r.z))
 
 	gej_verify(r)
 }

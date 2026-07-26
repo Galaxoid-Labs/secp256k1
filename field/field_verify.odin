@@ -54,7 +54,7 @@ fe_verify_magnitude :: #force_inline proc "contextless" (
 	loc := #caller_location,
 ) {
 	when VERIFY {
-		CHECK(m >= 0 && m <= 32, "fe_verify_magnitude: bound out of range", loc)
+		CHECK((m >= 0) & (m <= 32), "fe_verify_magnitude: bound out of range", loc)
 		CHECK(a.magnitude <= m, "fe_verify_magnitude: magnitude exceeds bound", loc)
 	}
 }

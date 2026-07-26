@@ -36,9 +36,10 @@ import "../params"
 import "../scalar"
 
 /*
-Whether internal invariant checks are compiled in. Follows `-debug`.
+Whether internal invariant checks are compiled in. Follows `-debug`, overridable with
+`-define:SECP256K1_VERIFY=false`; see the `field` package for why that override exists.
 */
-VERIFY :: ODIN_DEBUG
+VERIFY :: #config(SECP256K1_VERIFY, ODIN_DEBUG)
 
 @(private)
 CHECK :: #force_inline proc "contextless" (
@@ -129,7 +130,9 @@ odd_multiples_table :: proc "contextless" (
 	n := len(pre)
 	CHECK(n > 0, "odd_multiples_table: empty table")
 	CHECK(len(zr) >= n, "odd_multiples_table: ratio slice too small")
-	CHECK(!group.gej_is_infinity(a), "odd_multiples_table: input is infinity")
+	when VERIFY {
+		CHECK(!group.gej_is_infinity(a), "odd_multiples_table: input is infinity")
+	}
 
 	d, ai: group.Gej
 	d_ge: group.Ge
@@ -237,8 +240,8 @@ Variable-time in a. Never call this on a secret scalar.
 */
 wnaf :: proc "contextless" (out: []int, a: ^scalar.Scalar, w: uint) -> int {
 	length := len(out)
-	CHECK(length >= 0 && length <= 256, "wnaf: length out of range")
-	CHECK(w >= 2 && w <= 31, "wnaf: window out of range")
+	CHECK((length >= 0) & (length <= 256), "wnaf: length out of range")
+	CHECK((w >= 2) & (w <= 31), "wnaf: window out of range")
 
 	for i in 0 ..< length {
 		out[i] = 0
@@ -293,7 +296,7 @@ wnaf :: proc "contextless" (out: []int, a: ^scalar.Scalar, w: uint) -> int {
 As `wnaf`, but writes into an i8 array. Requires w <= 8.
 */
 wnaf_small :: proc "contextless" (out: []i8, a: ^scalar.Scalar, w: uint) -> int {
-	CHECK(w >= 2 && w <= 8, "wnaf_small: window out of range")
+	CHECK((w >= 2) & (w <= 8), "wnaf_small: window out of range")
 
 	tmp: [256]int
 	ret := wnaf(tmp[:len(out)], a, w)

@@ -21,6 +21,13 @@ around `u128` carries, so that a differential failure against upstream can be lo
 the same step in both implementations.
 */
 package scalar
+import "../params"
+
+// The 4x64 representation is compiled only for the real curve. Under
+// `-define:EXHAUSTIVE_ORDER=n` the whole scalar type is replaced by the single-word
+// implementation in `scalar_low.odin`, which mirrors upstream's `scalar_low_impl.h`.
+// Exactly one of the two is ever compiled.
+when params.EXHAUSTIVE_ORDER == 0 {
 
 /*
 A 192-bit accumulator: three 64-bit words, least significant first.
@@ -47,7 +54,7 @@ muladd :: #force_inline proc "contextless" (c: ^Acc, a, b: u64) {
 	c.mid += th // overflow handled on the next line
 	c.hi += u64(c.mid < th) // never overflows by contract
 
-	CHECK(c.mid >= th || c.hi != 0, "muladd: accumulator overflowed")
+	CHECK((c.mid >= th) | (c.hi != 0), "muladd: accumulator overflowed")
 }
 
 /*
@@ -85,7 +92,7 @@ sumadd_fast :: #force_inline proc "contextless" (c: ^Acc, a: u64) {
 	c.lo += a
 	c.mid += u64(c.lo < a)
 
-	CHECK(c.mid != 0 || c.lo >= a, "sumadd_fast: accumulator overflowed")
+	CHECK((c.mid != 0) | (c.lo >= a), "sumadd_fast: accumulator overflowed")
 	CHECK(c.hi == 0, "sumadd_fast: high word was not zero")
 }
 
@@ -271,4 +278,6 @@ scalar_mul_shift_var :: proc "contextless" (r: ^Scalar, a: ^Scalar, b: ^Scalar, 
 	scalar_cadd_bit(r, 0, (l[(shift - 1) >> 6] >> ((shift - 1) & 0x3f)) & 1 == 1)
 
 	scalar_verify(r)
+}
+
 }

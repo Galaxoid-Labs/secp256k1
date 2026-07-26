@@ -19,6 +19,7 @@ package extrakeys
 
 import "core:mem"
 import "../ecmult"
+import "../ct"
 import "../eckey"
 import "../field"
 import "../group"
@@ -194,23 +195,27 @@ keypair_create :: proc "contextless" (
 ) -> bool {
 	mem.zero_explicit(keypair, size_of(Keypair))
 
+	// No branch on key validity: substitute a valid scalar, do identical work, and fold the
+	// flag in at the end. `eckey.pubkey_create` is structured the same way and for the same
+	// reason — the validity of a secret key is itself secret, and upstream never
+	// declassifies it.
 	sk: scalar.Scalar
-	if !scalar.scalar_set_b32_seckey(&sk, seckey32) {
-		scalar.scalar_clear(&sk)
-		return false
-	}
+	valid := scalar.scalar_set_b32_seckey(&sk, seckey32)
+	scalar.scalar_cmov(&sk, &scalar.ONE, !valid)
 
 	pk: group.Ge
-	if !eckey.pubkey_create(ctx, &pk, &sk) {
-		scalar.scalar_clear(&sk)
-		mem.zero_explicit(keypair, size_of(Keypair))
-		return false
-	}
+	created := eckey.pubkey_create(ctx, &pk, &sk)
 
 	keypair.seckey = sk
 	keypair.pubkey = pk
 	scalar.scalar_clear(&sk)
-	return true
+
+	// Constant-time erase: `ok` folds in secret-key validity, so an `if` here would leak
+	// exactly the bit the substitution above was there to protect. Upstream uses
+	// `secp256k1_memczero` in the same place.
+	ok := valid & created
+	ct.czero(keypair, size_of(Keypair), !ok)
+	return ok
 }
 
 /*
@@ -260,19 +265,18 @@ keypair_xonly_tweak_add :: proc "contextless" (keypair: ^Keypair, tweak32: ^[32]
 		scalar.scalar_negate(&sk, &sk)
 	}
 
+	// Bitwise `&`, not `&&`: both tweaks must always be applied, so neither operand's
+	// evaluation depends on the other's result.
 	ok := eckey.privkey_tweak_add(&sk, &tweak)
-	ok = eckey.pubkey_tweak_add(&pk, &tweak) && ok
-
-	if !ok {
-		scalar.scalar_clear(&sk)
-		mem.zero_explicit(keypair, size_of(Keypair))
-		return false
-	}
+	ok = eckey.pubkey_tweak_add(&pk, &tweak) & ok
 
 	keypair.seckey = sk
 	keypair.pubkey = pk
 	scalar.scalar_clear(&sk)
-	return true
+
+	// As in `keypair_create`: erase without branching on the outcome.
+	ct.czero(keypair, size_of(Keypair), !ok)
+	return ok
 }
 
 /*

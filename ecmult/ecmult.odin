@@ -298,7 +298,10 @@ As `wnaf`, but writes into an i8 array. Requires w <= 8.
 wnaf_small :: proc "contextless" (out: []i8, a: ^scalar.Scalar, w: uint) -> int {
 	CHECK((w >= 2) & (w <= 8), "wnaf_small: window out of range")
 
-	tmp: [256]int
+	// Uninitialized on purpose: `wnaf` zeroes the prefix it is given before writing, and
+	// only that prefix is read below. Odin would otherwise zero all 256 entries — 2 KB per
+	// call, twice per `ecmult`, immediately overwritten.
+	tmp: [256]int = ---
 	ret := wnaf(tmp[:len(out)], a, w)
 
 	for i in 0 ..< len(out) {

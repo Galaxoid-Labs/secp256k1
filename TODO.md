@@ -417,7 +417,25 @@ materially different and has never been measured.
       bitwise `&`/`|` replacements. That is the trade this project is meant to make, but it
       is a cost and the README says so.
 - [x] Flagged the ARM64 table as **stale** — it predates the Phase 8 fixes and cannot be
-      re-measured on this machine, so it must be re-run on a Mac before being quoted.
+      re-measured on this machine.
+- [ ] **Re-bench on macOS/ARM64.** The published ARM64 table is from before the
+      constant-time work, the MuSig2 and ellswift fixes, and the table embedding, so every
+      number in it is wrong by an unknown amount. On x86-64 the same changes moved
+      `schnorrsig_sign` from 0.96x to 1.00x, so expect ARM64 to have shifted similarly.
+
+      What to run on the Mac, with an upstream v0.7.1 build linked through
+      `oracle/link-lib.sh`:
+
+      ```sh
+      ./bench/run.sh -define:ITERS=20000                    # both sides default -O2
+      ./bench/run.sh -define:ITERS=20000 -microarch:native  # against a -mcpu=native C build
+      ```
+
+      Take a complete run rather than per-row bests, and check three runs agree. Two things
+      to watch that do not apply on x86-64: upstream ships **no** assembly on ARM64, so every
+      comparison there is Odin-vs-C rather than Odin-vs-asm; and the start-up measurement
+      (`8 ms` -> `1 ms` from embedding the tables) should be redone, since it is dominated by
+      memory bandwidth and will differ on Apple silicon.
 - [x] Report both architectures separately; do not average them — `README.md` now carries
       two tables and states which is which.
 

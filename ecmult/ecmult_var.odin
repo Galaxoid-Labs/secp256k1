@@ -90,8 +90,10 @@ ecmult :: proc "contextless" (
 	}
 
 	// Split ng into its low and high 128-bit halves, matching the two generator tables.
-	wnaf_ng_1: [129]int
-	wnaf_ng_128: [129]int
+	// Uninitialized on purpose: `wnaf` zeroes what it writes, and entries past the returned
+	// bit count are never read.
+	wnaf_ng_1: [129]int = ---
+	wnaf_ng_128: [129]int = ---
 	bits_ng_1 := 0
 	bits_ng_128 := 0
 

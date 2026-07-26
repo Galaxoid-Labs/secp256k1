@@ -477,3 +477,88 @@ test_run_ecmult_constants :: proc(t: ^testing.T) {
 		)
 	}
 }
+
+/*
+Every entry of both generator tables is the point it claims to be.
+
+This is the check that makes `-define:SECP256K1_EMBED_TABLES=true` safe. With the tables
+embedded, `PRE_G` is a slice over bytes produced by a separate program at some earlier time
+— exactly the "checked-in blob that drifts out of sync with the code" that building at
+runtime was meant to avoid. Recomputing all 16,384 entries here from the curve definition
+and comparing removes that risk: a stale or corrupted blob fails, rather than quietly
+serving wrong points.
+
+`CLAUDE.md`: "Regeneration from scratch must reproduce byte-identical tables; that
+reproduction is a test." This is that test, and it runs in both modes — with the tables
+built at runtime it re-derives what was just computed, which is cheap and still catches a
+generator bug.
+
+Full coverage costs about 16,000 point additions, a few milliseconds.
+*/
+@(test)
+test_pre_g_tables_are_reproducible :: proc(t: ^testing.T) {
+	ecmult.ensure_init()
+
+	testing.expect_value(t, len(ecmult.PRE_G), ecmult.TABLE_SIZE_G)
+	testing.expect_value(t, len(ecmult.PRE_G_128), ecmult.TABLE_SIZE_G)
+
+	// 2*G, the step between consecutive odd multiples.
+	two_g_affine: group.Ge
+	{
+		gj: group.Gej
+		group.gej_set_ge(&gj, &group.GENERATOR)
+		dbl: group.Gej
+		group.gej_double_var(&dbl, &gj, nil)
+		group.ge_set_gej_var(&two_g_affine, &dbl)
+	}
+
+	check_table :: proc(
+		t: ^testing.T,
+		table: []group.Ge_Storage,
+		start: ^group.Gej,
+		step: ^group.Ge,
+		name: string,
+	) {
+		acc := start^
+		bad := 0
+		for i in 0 ..< len(table) {
+			entry: group.Ge
+			group.ge_from_storage(&entry, &table[i])
+			if !group.gej_eq_ge_var(&acc, &entry) {
+				bad += 1
+				if bad <= 3 {
+					testing.expectf(t, false, "%s[%d] does not match a fresh computation", name, i)
+				}
+			}
+			group.gej_add_ge_var(&acc, &acc, step, nil)
+		}
+		testing.expectf(t, bad == 0, "%s: %d of %d entries wrong", name, bad, len(table))
+	}
+
+	// PRE_G[i] = (2i+1)*G, starting from G.
+	{
+		acc: group.Gej
+		group.gej_set_ge(&acc, &group.GENERATOR)
+		check_table(t, ecmult.PRE_G[:], &acc, &two_g_affine, "PRE_G")
+	}
+
+	// PRE_G_128[i] = (2i+1)*2^128*G, starting from 2^128*G. Note the step is 2*2^128*G, not
+	// 2*G — consecutive entries differ by twice the table's *own* base point.
+	{
+		g128: group.Gej
+		group.gej_set_ge(&g128, &group.GENERATOR)
+		for _ in 0 ..< 128 {
+			group.gej_double_var(&g128, &g128, nil)
+		}
+
+		step128: group.Ge
+		{
+			dbl: group.Gej
+			group.gej_double_var(&dbl, &g128, nil)
+			group.ge_set_gej_var(&step128, &dbl)
+		}
+
+		acc := g128
+		check_table(t, ecmult.PRE_G_128[:], &acc, &step128, "PRE_G_128")
+	}
+}

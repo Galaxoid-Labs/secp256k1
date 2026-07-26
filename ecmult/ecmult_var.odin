@@ -46,6 +46,10 @@ ecmult :: proc "contextless" (
 	na: ^scalar.Scalar,
 	ng: ^scalar.Scalar,
 ) {
+	// Idempotent and cheap once warm; the tables are normally already built by `@(init)`.
+	// This is here so that a C consumer, which gets no `@(init)`, still works.
+	ensure_var_tables()
+
 	// Odd multiples of a, and their beta-scaled x coordinates for the endomorphism.
 	pre_a: [TABLE_SIZE_A]group.Ge
 	aux: [TABLE_SIZE_A]field.Field_Elem

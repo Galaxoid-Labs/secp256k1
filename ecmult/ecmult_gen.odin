@@ -145,9 +145,10 @@ an infinite affine operand. With b = -1 the offsets are ge_offset = -G and
 scalar_offset = diff + 1, which is equally unblinded and always well defined.
 */
 ecmult_gen_context_build :: proc "contextless" (ctx: ^Ecmult_Gen_Context) {
-	// Every context creation funnels through here, so this is the natural place to make
-	// sure the precomputed tables exist even when `@(init)` never ran.
-	ensure_init()
+	// Only the signing comb table is needed here. `ecmult_gen` never reads `PRE_G` — those
+	// serve the variable-time engine — so building them from a signing setup path would be
+	// ~12 ms of work for a megabyte this context never touches.
+	ensure_gen_table()
 
 	diff: scalar.Scalar
 	gen_scalar_diff(&diff)

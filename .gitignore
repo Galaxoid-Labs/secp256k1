@@ -30,6 +30,15 @@
 # The differential oracle links a locally built libsecp256k1; never committed.
 /oracle/libsecp256k1.a
 
-# Compiled shim for the constant-time harness.
-/ct_tests/checkmem.o
-/ct_tests.bin
+# Compiled shim for the constant-time harness. The harness sources themselves are tracked.
+/ct_tests/*.o
+
+/csuite_test
+/libsecp256k1_csuite.a
+/csuite_upstream_test
+
+# The generated generator tables. Negated out of the blanket `*.bin` above: the
+# embedded-table build is the default and `#load` resolves at compile time, so a fresh clone
+# must have this or it will not build. Regenerate with `odin run precompute_ecmult/`;
+# `tests/ecmult` recomputes every entry and compares, so a stale blob fails loudly.
+!ecmult/pre_g.bin

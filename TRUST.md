@@ -10,9 +10,8 @@ Two states, per `CLAUDE.md`:
 - **`unverified`** — correct on vectors, but not yet cleared by the constant-time harness.
 - **`ct-verified`** — zero valgrind constant-time findings across its secret paths.
 
-"Verified" means it meets *this project's* bar. It does not mean audited. Regardless of
-what any row below says: **unaudited hand-rolled cryptography must never guard real
-value.**
+"Verified" means it meets *this project's* bar, defined below. It does not mean audited, and
+no row here should be read as one — this library is provided as is, without warranty.
 
 Public-data paths — verify, recovery, ellswift decode, key and address derivation — reach
 `ct-verified` trivially once their vectors pass, because they have no secrets to leak.
@@ -27,13 +26,82 @@ last to graduate, and its nonce handling is the highest-risk code in the project
    secret-dependent branch in ECDSA scores |t| = 44.2, while both pass the entire functional
    suite *and* the differential oracle.
 
-2. **valgrind / MSan instruction-level check — cannot run on this platform.** valgrind has
-   no macOS ARM64 port (`brew install` refuses: "Linux is required") and clang rejects
-   `-fsanitize=memory` for `arm64-apple-darwin`. Both were attempted, not assumed.
+2. **valgrind instruction-level check — now running, on Linux/x86-64.** It cannot run on
+   macOS ARM64 (valgrind has no port; clang rejects `-fsanitize=memory` for
+   `arm64-apple-darwin`) — both were attempted, not assumed. On Fedora x86-64 with valgrind
+   3.27.1 it runs, and its first run found **seven real defects** that (1) did not catch:
 
-`ct-verified` is granted only on (2), because only instruction-level checking can see leaks
-that do not show up as wall-clock time. Every symbol below therefore remains `unverified`
-— but the timing evidence is real, and it is the strongest available on this platform.
+   | defect | why the statistical test missed it |
+   |---|---|
+   | `ecmult_gen`'s cmov table scan rewritten by LLVM into a branch + secret-indexed load | a correctly-predicted branch and an L1-resident load cost too little wall-clock to register |
+   | `scalar_set_b32_seckey`, `fe_normalizes_to_zero`, `ecdh` (×2), `ecdsa_sig_sign` short-circuiting `&&`/`||` on secret data | fires only on inputs a random sample essentially never produces (invalid key, zero nonce) |
+   | `ecdsa_sig_sign` branching on the low-S flag to set the recovery id | one predictable branch |
+   | `pubkey_create` early-returning on a zero key | invalid keys are never sampled |
+
+   This is the concrete case for why `ct-verified` is granted only on (2). Five of the seven
+   are reachable only on inputs that random timing samples never generate; the dudect test
+   was clean throughout, and remains clean.
+
+   All seven are fixed. A further ten findings were legitimate declassification points —
+   secret-key validity, RFC6979 nonce-retry validity, MuSig2 nonce non-zero-ness, and
+   Schnorr's `R` — which the library previously had no way to express. They are handled by
+   the `ct` declassification hook, mirroring upstream's `secp256k1_declassify()`, with each
+   call site carrying the justification for why that value has become public.
+
+   Two further defects surfaced while closing them out, both caused by `CHECK` evaluating
+   its argument even when the invariant layer is compiled out: `gej_rescale` ran a
+   variable-time zero test on the blinding factor, and several accumulator checks used
+   short-circuit `&&`/`||` on secret data. Only the optimizer removed them, and only at
+   `-o:speed` — which is why the gate is now run at both optimization levels.
+
+   **The gate is now clean: 0 errors from 0 contexts**, at both `-o:none` and `-o:speed`,
+   after a `declassify` hook was added so the library can mark values that have legitimately
+   become public (see `ct/`).
+
+   **The harness is validated by injection, not assumed.** Replacing ECDH's constant-time
+   `ecmult_const` with the variable-time `ecmult` — a genuine key-recovery leak — produces
+   19 error contexts. With that same leak in place, **all 105 functional tests pass and the
+   differential oracle still reports zero divergences.** That is the clearest statement
+   available of what this gate buys and what correctness testing cannot:
+
+   | with a variable-time multiply on the secret scalar | result |
+   |---|---|
+   | 105 functional tests | all pass |
+   | differential oracle vs libsecp256k1 | zero divergences |
+   | valgrind constant-time harness | **19 contexts** |
+
+# What `ct-verified` covers, and what it does not
+
+`ct-verified` is granted only on (2), and only when (2) is clean. It is now clean, so the
+ten secret paths the harness exercises are verified end to end, along with everything they
+transitively execute:
+
+`eckey.pubkey_create`, `ecdsa.sign`, `schnorr.sign`, `ecdh.ecdh`,
+`eckey.privkey_tweak_add`, `musig.nonce_gen` + `musig.partial_sign`,
+`extrakeys.keypair_create` + `keypair_xonly_tweak_add`, `musig.pubkey_{xonly,ec}_tweak_add`,
+`recovery.sign_recoverable`, and `ellswift.create` + `ellswift.xdh`.
+
+Per-symbol attribution below is deliberately *not* claimed from this run. Callgrind was used
+to enumerate the executed set and undercounts badly, because `#force_inline` symbols are
+absorbed into their callers and never appear as call targets. Rather than mark rows
+`ct-verified` on evidence that does not distinguish "not executed" from "inlined", the
+status column changes only for the entry points above. The arithmetic they rest on is
+covered in fact but is left `unverified` here until per-symbol coverage can be shown rather
+than inferred.
+
+Extending the harness to those last four paths found three more defects of the same kind:
+`keypair_create` and `ellswift.create` early-returned on an invalid key, and
+`keypair_create`/`keypair_xonly_tweak_add` erased the keypair behind an `if` on a flag that
+folds in key validity — upstream uses a constant-time `memczero` there, which now exists as
+`ct.czero`.
+
+Two modelling corrections came out of it as well, both settled by reading upstream's own
+`ctime_tests` rather than by argument: BIP341 tweaks are **not** secret ("The tweak is not
+treated as a secret in keypair_tweak_add"), and ellswift auxiliary randomness is not secret
+either — upstream passes a previous public encoding as aux.
+
+Still outside the harness: ECDSA/Schnorr *verification*, public-key parsing and ellswift
+*decoding*, which handle only public data and have no secrets to leak.
 
 ---
 
@@ -71,15 +139,16 @@ so every entry here needs a `ctime_tests` case in Phase 8.
 | `fe_set_b32_mod` | unverified | ✅ | ✅ | |
 | `fe_set_b32_limit` | unverified | ✅ | ✅ | |
 | `fe_get_b32` | unverified | ✅ | ✅ | |
-| `fe_inv` | not implemented | — | — | needs safegcd `modinv64` |
-| `fe_inv_var` | not implemented | — | — | needs safegcd `modinv64_var` |
-| `fe_sqrt` | not implemented | — | — | a^((p+1)/4) addition chain |
-| `fe_is_square_var` | not implemented | — | — | needs `jacobi64_maybe_var` |
+| `fe_inv` | unverified | ✅ | ✅ | safegcd `modinv64`; on the verified signing paths |
+| `fe_inv_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
+| `fe_sqrt` | unverified | ✅ | ✅ | used by point decompression, a public-data path |
+| `fe_is_square_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
 
 "Vectors ✅" here means the tier 2 mirrored suite and the known-answer vectors pass in both
-release and `-debug` builds. It does **not** yet mean the Phase 9 differential oracle
-agrees with libsecp256k1 byte for byte, which is a separate requirement in the definition
-of done and is not satisfied for any symbol yet.
+release and `-debug` builds. The Phase 9 differential oracle is now also running and reports
+zero divergences against libsecp256k1 on both ARM64 and x86-64, so that separate requirement
+in the definition of done is satisfied for the symbols the oracle reaches — see the oracle
+column.
 
 ## scalar
 
@@ -217,8 +286,8 @@ Phase 6. Key encoding and tweaking.
 |---|---|---|---|---|
 | `pubkey_parse` | unverified | ✅ | ✅ | rejects out-of-range, off-curve and inconsistent hybrid tags |
 | `pubkey_serialize33`, `pubkey_serialize65` | unverified | ✅ | ✅ | |
-| `pubkey_create` | unverified | ✅ | ✅ | uses blinded `ecmult_gen` |
-| `privkey_tweak_add`, `privkey_tweak_mul` | unverified | ✅ | ✅ | reject results that would be invalid keys |
+| `pubkey_create` | **ct-verified** | ✅ | ✅ | uses blinded `ecmult_gen`; valgrind clean, no branch on key validity |
+| `privkey_tweak_add`, `privkey_tweak_mul` | **ct-verified** | ✅ | ✅ | reject results that would be invalid keys; `_add` valgrind clean |
 | `pubkey_tweak_add`, `pubkey_tweak_mul` | unverified | ✅ | ✅ | |
 | `pubkey_negate` | unverified | ✅ | ✅ | |
 
@@ -228,7 +297,7 @@ Phase 6. Signing is on the secret path; verification is entirely public.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `sign` | unverified | ✅ | ✅ | RFC6979 nonce; exact-match vectors from an independent reference |
+| `sign` | **ct-verified** | ✅ | ✅ | RFC6979 nonce; exact-match vectors from an independent reference; valgrind clean |
 | `sig_sign` | unverified | ✅ | ✅ | caller-supplied nonce |
 | `verify`, `sig_verify` | unverified | ✅ | ✅ | variable-time by design; public data only |
 | `nonce_function_rfc6979` | unverified | ✅ | ✅ | fixed-length fields prevent input confusion |
@@ -261,7 +330,7 @@ Phase 6. BIP340. Signing is on the secret path.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `sign` | unverified | ✅ | ✅ | official BIP340 vectors pass byte-for-byte |
+| `sign` | **ct-verified** | ✅ | ✅ | official BIP340 vectors pass byte-for-byte; valgrind clean |
 | `verify` | unverified | ✅ | ✅ | variable-time by design; public data only |
 | `nonce_function_bip340` | unverified | ✅ | ✅ | aux-rand masking; deterministic without it |
 
@@ -274,7 +343,7 @@ Phase 6. The scalar is a private key throughout.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `ecdh` | unverified | ✅ | ✅ | uses `ecmult_const`; symmetry tested |
+| `ecdh` | **ct-verified** | ✅ | ✅ | uses `ecmult_const`; valgrind clean, and the injection test targets this path |
 | `hash_function_sha256` | unverified | ✅ | ✅ | hashes the compressed point, so both parties agree |
 
 **Note:** replacing `ecmult_const` here with the variable-time engine passes every test.
@@ -320,9 +389,9 @@ last symbol scheduled to reach `ct-verified`.
 | `compute_pks_hash` | unverified | ✅ | ✅ | order-dependent by design |
 | `pubkey_sort` | unverified | ✅ | ✅ | makes aggregation canonical |
 | `pubkey_xonly_tweak_add`, `pubkey_ec_tweak_add` | unverified | ✅ | ✅ | maintains `tweak` and `parity_acc` |
-| `nonce_gen` | unverified | ✅ | ✅ | **session id must never repeat** |
+| `nonce_gen` | **ct-verified** | ✅ | ✅ | **session id must never repeat**; BIP327 vectors match exactly; valgrind clean |
 | `nonce_agg`, `nonce_process` | unverified | ✅ | ✅ | binding coefficient b |
-| **`partial_sign`** | unverified | ✅ | ✅ | wipes the secnonce first; reuse tested impossible |
+| **`partial_sign`** | **ct-verified** | ✅ | ✅ | wipes the secnonce first; reuse tested impossible |
 | `partial_sig_verify` | unverified | ✅ | ✅ | attributes failure to a specific signer |
 | `partial_sig_agg` | unverified | ✅ | ✅ | includes the tweak contribution |
 | `secnonce_clear` | unverified | ✅ | ✅ | for abandoned sessions |

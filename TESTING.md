@@ -3,9 +3,19 @@
 Three tiers, with different purposes and different gates. Tier 2 is the one written
 alongside the code; tier 3 is what licenses the claim in the README.
 
-**Upstream reference:** `bitcoin-core/secp256k1` **v0.7.1**, checked out locally at
-`/Users/jdavis/Development/secp256k1`. All line and function references below are against
-that tag. Pin any new reference to a tag, never to `master`.
+**Upstream reference:** `bitcoin-core/secp256k1` **v0.7.1**. All line and function
+references below are against that tag. Pin any new reference to a tag, never to `master`.
+
+The checkout is not vendored and its location is per-machine — `TODO.md` has the clone and
+build recipe. One checkout supplies four things: the differential oracle's `libsecp256k1.a`,
+the Wycheproof JSON corpora, the BIP327 MuSig2 vectors, and `tests.c` for Strategy A.
+
+**Vector tables are generated, not hand-typed.** `tools/gen_wycheproof_vectors.py` and
+`tools/gen_bip327_vectors.py` transcribe the upstream JSON and C header into Odin tables.
+Regenerating must reproduce those files byte for byte; that is the check that they were not
+edited, which `CLAUDE.md` forbids. The BIP327 generator parses the C initializers
+structurally rather than scraping hex, so a shape change upstream is a parse error here
+instead of a silently wrong table.
 
 ---
 

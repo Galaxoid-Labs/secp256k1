@@ -218,6 +218,7 @@ odin test tests/oracle/ -define:FUZZ_COUNT=2000            # differential vs C
 
 ./ct_tests/build.sh --valgrind && valgrind --error-exitcode=1 ./ct_tests.bin
 ./ct_tests/build.sh --valgrind -o:speed && valgrind --error-exitcode=1 ./ct_tests.bin
+./ct_tests/build.sh --dudect && ./ct_tests.bin           # statistical timing, runs anywhere
 ./csuite/build.sh                                          # upstream test bodies, via C
 ./dropin/run.sh /path/to/upstream/secp256k1                # drop-in swap against C
 ```

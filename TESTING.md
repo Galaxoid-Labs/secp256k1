@@ -297,7 +297,7 @@ rejects `-fsanitize=memory` for `arm64-apple-darwin`. Run that route on Linux or
 **A statistical timing test runs everywhere and is currently clean:**
 
 ```sh
-odin run ct_tests/ -o:speed -define:DUDECT=true
+./ct_tests/build.sh --dudect && ./ct_tests.bin
 ```
 
 dudect-style (Reparaz/Balasch/Verbauwhede, DATE 2017): time each operation with a fixed

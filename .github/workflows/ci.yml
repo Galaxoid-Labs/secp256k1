@@ -213,10 +213,15 @@ jobs:
       - uses: ./.github/actions/install-odin
         with:
           version: ${{ env.ODIN_VERSION }}
-      # Shared CI runners are noisy, so the sample count is raised rather than the
-      # threshold lowered. A |t| above 10 on any path is a hard failure.
+      # Through build.sh, not `odin run`: the package foreign-imports checkmem.o
+      # unconditionally, so a clean checkout has nothing to link against otherwise.
+      #
+      # Shared CI runners are noisy, so the sample count is raised rather than the threshold
+      # lowered. A |t| above 10 on any path is a hard failure.
       - name: Welch t-test on five secret paths
-        run: odin run ct_tests/ -o:speed -define:DUDECT=true -define:DUDECT_SAMPLES=40000
+        run: |
+          ./ct_tests/build.sh --dudect -o:speed -define:DUDECT_SAMPLES=40000
+          ./ct_tests.bin
 
   # ---------------------------------------------------------------------------
   # The C boundary. Both of these found bugs nothing else could: @(init) never runs when

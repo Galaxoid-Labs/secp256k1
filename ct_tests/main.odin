@@ -461,7 +461,7 @@ main :: proc() {
 		fmt.println("  valgrind has no macOS ARM64 port; use Linux or CI.")
 		fmt.println()
 		fmt.println("  A statistical timing test runs anywhere:")
-		fmt.println("      odin run ct_tests/ -o:speed -define:DUDECT=true")
+		fmt.println("      ./ct_tests/build.sh --dudect && ./ct_tests.bin")
 		fmt.println()
 		// Exit non-zero so this can never be mistaken for a passing gate.
 		os.exit(2)

@@ -37,7 +37,7 @@ stronger.
 The two approaches are complementary, and neither replaces the other. `TRUST.md` grants
 `ct-verified` only on the valgrind gate; this test is evidence, not the gate.
 
-	odin run ct_tests/ -o:speed -define:DUDECT=true
+	./ct_tests/build.sh --dudect && ./ct_tests.bin
 */
 package ct_tests
 

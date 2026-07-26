@@ -124,8 +124,15 @@ signature_serialize_der :: proc "contextless" (out: []u8, sig: ^Signature) -> in
 /*
 Reads a DER length octet.
 
-Only the short form and minimally encoded long forms are accepted; everything else is
-non-canonical.
+DER, unlike BER, requires the *shortest* encoding of a length, not merely a minimally
+padded one: the long form is legal only for lengths of 128 or more, because anything
+smaller fits in the short form. A signature's lengths are always well under 128, so in
+practice this rejects every long-form length — which is the point. Accepting `0x81 0x45`
+as a synonym for `0x45` would make the encoding non-unique, and a non-unique encoding of a
+signature is a malleability vector: the same signature could be presented two ways with two
+different hashes.
+
+Both callers are on the strict path. The lax parser deliberately does its own thing.
 */
 @(private)
 der_read_len :: proc "contextless" (
@@ -174,6 +181,11 @@ der_read_len :: proc "contextless" (
 		l = (l << 8) | int(sig[pos^])
 		pos^ += 1
 		lenleft -= 1
+	}
+	if l < 0x80 {
+		// Encodable in the short form, so the long form is not the shortest encoding and
+		// this is not DER.
+		return false
 	}
 	if l > len(sig) - pos^ {
 		return false

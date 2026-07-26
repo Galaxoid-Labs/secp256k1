@@ -32,6 +32,7 @@ caller that retries after a failure must not get a second signature under the fi
 package musig
 
 import "core:mem"
+import "../ct"
 import "../ecmult"
 import "../eckey"
 import "../extrakeys"
@@ -198,60 +199,86 @@ nonce_gen :: proc "contextless" (
 	agg_pk32: ^[32]u8 = nil,
 	extra_input32: ^[32]u8 = nil,
 ) -> bool {
-	// Derive both nonces from one tagged hash over every available input. Each optional
-	// field is length-prefixed by a presence byte so that omitting one cannot be confused
-	// with supplying a different one.
-	sha: hash.Sha256
-	tag := "MuSig/nonce"
-	hash.sha256_initialize_tagged(&sha, transmute([]u8)tag)
-
-	hash.sha256_write(&sha, session_id32[:])
-
+	// BIP327 NonceGen, exactly. Every framing detail below is normative, not stylistic:
+	// this derivation has to agree byte for byte with any other conforming implementation,
+	// and a scheme that is merely self-consistent will interoperate with nobody and fail
+	// the specification's vectors.
+	//
+	//   rand      = seckey XOR tagged_hash("MuSig/aux", session_id), or session_id alone
+	//   k_i       = int(tagged_hash("MuSig/nonce",
+	//                     rand || len(pk)  || pk
+	//                          || len(aggpk) || aggpk
+	//                          || msg_prefix
+	//                          || len32(extra) || extra
+	//                          || i)) mod n
+	//
+	// The secret key is folded in by XOR against a hash of the session id rather than being
+	// hashed alongside it, so that a caller who reuses a session id across signers still
+	// gets distinct nonces. The signer's own public key is part of the hash for the same
+	// reason — omitting it is how two signers sharing entropy end up sharing a nonce, which
+	// leaks both secret keys.
+	rand: [32]u8
 	if seckey32 != nil {
-		flag := [1]u8{32}
-		hash.sha256_write(&sha, flag[:])
-		hash.sha256_write(&sha, seckey32[:])
+		aux: hash.Sha256
+		hash.sha256_initialize_tagged(&aux, transmute([]u8)string("MuSig/aux"))
+		hash.sha256_write(&aux, session_id32[:])
+		hash.sha256_finalize(&aux, &rand)
+		hash.sha256_clear(&aux)
+		for i in 0 ..< 32 {
+			rand[i] ~= seckey32[i]
+		}
 	} else {
-		flag := [1]u8{0}
-		hash.sha256_write(&sha, flag[:])
+		rand = session_id32^
 	}
 
+	sha: hash.Sha256
+	hash.sha256_initialize_tagged(&sha, transmute([]u8)string("MuSig/nonce"))
+	hash.sha256_write(&sha, rand[:])
+
+	// The signer's public key, length-prefixed with its 33-byte compressed form.
+	pk_ser: [33]u8
+	eckey.pubkey_serialize33(pubkey, &pk_ser)
+	pk_len := [1]u8{33}
+	hash.sha256_write(&sha, pk_len[:])
+	hash.sha256_write(&sha, pk_ser[:])
+
+	// The aggregate key, or a zero length when absent.
 	if agg_pk32 != nil {
-		flag := [1]u8{32}
-		hash.sha256_write(&sha, flag[:])
+		l := [1]u8{32}
+		hash.sha256_write(&sha, l[:])
 		hash.sha256_write(&sha, agg_pk32[:])
 	} else {
-		flag := [1]u8{0}
-		hash.sha256_write(&sha, flag[:])
+		l := [1]u8{0}
+		hash.sha256_write(&sha, l[:])
 	}
 
+	// The message is framed as a presence byte and, when present, an 8-byte big-endian
+	// length. An absent message and a 32-byte zero message must not hash alike.
 	if msg32 != nil {
-		flag := [1]u8{32}
-		hash.sha256_write(&sha, flag[:])
+		present := [1]u8{1}
+		hash.sha256_write(&sha, present[:])
+		msg_len := [8]u8{0, 0, 0, 0, 0, 0, 0, 32}
+		hash.sha256_write(&sha, msg_len[:])
 		hash.sha256_write(&sha, msg32[:])
 	} else {
-		flag := [1]u8{0}
-		hash.sha256_write(&sha, flag[:])
+		present := [1]u8{0}
+		hash.sha256_write(&sha, present[:])
 	}
 
+	// Extra input carries a 4-byte big-endian length, unlike the message's 8.
 	if extra_input32 != nil {
-		flag := [1]u8{32}
-		hash.sha256_write(&sha, flag[:])
+		l := [4]u8{0, 0, 0, 32}
+		hash.sha256_write(&sha, l[:])
 		hash.sha256_write(&sha, extra_input32[:])
 	} else {
-		flag := [1]u8{0}
-		hash.sha256_write(&sha, flag[:])
+		l := [4]u8{0, 0, 0, 0}
+		hash.sha256_write(&sha, l[:])
 	}
 
-	seed: [32]u8
-	hash.sha256_finalize(&sha, &seed)
-	hash.sha256_clear(&sha)
-
-	// Expand the seed into the two nonces, each with its own index so they cannot collide.
+	// Both nonces come from the same prefix with the index appended, so the state is cloned
+	// rather than recomputed.
 	for i in 0 ..< 2 {
-		h: hash.Sha256
-		hash.sha256_initialize_tagged(&h, transmute([]u8)string("MuSig/noncegen"))
-		hash.sha256_write(&h, seed[:])
+		h := sha
 		idx := [1]u8{u8(i)}
 		hash.sha256_write(&h, idx[:])
 
@@ -260,10 +287,19 @@ nonce_gen :: proc "contextless" (
 		hash.sha256_clear(&h)
 
 		scalar.scalar_set_b32(&secnonce.k[i], &out)
-		if scalar.scalar_is_zero(&secnonce.k[i]) {
+		mem.zero_explicit(&out, size_of(out))
+
+		// Whether the derived nonce came out zero is declassified so the rejection can
+		// branch on it. Only that one bit becomes public, not the nonce, and it is set with
+		// probability below 1 in 2^255. Upstream declassifies the same bit in
+		// `musig_secnonce_load`.
+		is_zero := scalar.scalar_is_zero(&secnonce.k[i])
+		ct.declassify(&is_zero, size_of(is_zero))
+		if is_zero {
 			// Astronomically unlikely; refuse rather than substitute.
 			mem.zero_explicit(secnonce, size_of(Secnonce))
-			mem.zero_explicit(&seed, size_of(seed))
+			mem.zero_explicit(&rand, size_of(rand))
+			hash.sha256_clear(&sha)
 			return false
 		}
 
@@ -271,12 +307,12 @@ nonce_gen :: proc "contextless" (
 		ecmult.ecmult_gen(ctx, &rj, &secnonce.k[i])
 		group.ge_set_gej(&pubnonce.pt[i], &rj)
 		group.gej_clear(&rj)
-		mem.zero_explicit(&out, size_of(out))
 	}
 
 	secnonce.pk = pubkey^
 	secnonce.valid = true
-	mem.zero_explicit(&seed, size_of(seed))
+	mem.zero_explicit(&rand, size_of(rand))
+	hash.sha256_clear(&sha)
 	return true
 }
 
@@ -434,6 +470,19 @@ partial_sign :: proc "contextless" (
 	mem.zero_explicit(secnonce, size_of(Secnonce))
 
 	if !local.valid {
+		mem.zero_explicit(&local, size_of(Secnonce))
+		return false
+	}
+
+	// Reject a zeroed nonce on its own merits, not only via the `valid` flag.
+	//
+	// The flag catches the ordinary reuse case, because `partial_sign` clears it above. This
+	// catches a secnonce that arrived zeroed by some other route — a caller that
+	// deserialized one, memset it, or copied a wiped struct. Signing with k = 0 makes s = e*d
+	// and hands the secret key to anyone who sees the partial signature, so it must fail
+	// even when the bookkeeping says the nonce is usable. BIP327 requires the rejection and
+	// upstream enforces it in `musig_secnonce_load`.
+	if scalar.scalar_is_zero(&local.k[0]) || scalar.scalar_is_zero(&local.k[1]) {
 		mem.zero_explicit(&local, size_of(Secnonce))
 		return false
 	}

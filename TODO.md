@@ -418,24 +418,23 @@ materially different and has never been measured.
       is a cost and the README says so.
 - [x] Flagged the ARM64 table as **stale** — it predates the Phase 8 fixes and cannot be
       re-measured on this machine.
-- [ ] **Re-bench on macOS/ARM64.** The published ARM64 table is from before the
-      constant-time work, the MuSig2 and ellswift fixes, and the table embedding, so every
-      number in it is wrong by an unknown amount. On x86-64 the same changes moved
-      `schnorrsig_sign` from 0.96x to 1.00x, so expect ARM64 to have shifted similarly.
-
-      What to run on the Mac, with an upstream v0.7.1 build linked through
-      `oracle/link-lib.sh`:
-
-      ```sh
-      ./bench/run.sh -define:ITERS=20000                    # both sides default -O2
-      ./bench/run.sh -define:ITERS=20000 -microarch:native  # against a -mcpu=native C build
-      ```
-
-      Take a complete run rather than per-row bests, and check three runs agree. Two things
-      to watch that do not apply on x86-64: upstream ships **no** assembly on ARM64, so every
-      comparison there is Odin-vs-C rather than Odin-vs-asm; and the start-up measurement
-      (`8 ms` -> `1 ms` from embedding the tables) should be redone, since it is dominated by
-      memory bandwidth and will differ on Apple silicon.
+- [x] **Re-benched on macOS/ARM64**, three runs of each configuration; every row landed
+      within ±0.02 and the aggregate within ±0.01. Default `-O2`: aggregate **1.04×**, with
+      `ec_pubkey_create` and `schnorrsig_sign` at 0.99× and `ecdh` worst at 1.08×. Both
+      sides tuned: aggregate **1.01×**, `ec_pubkey_create` and `schnorrsig_sign` 0.97×.
+      `README.md` now carries four tables — two architectures × tuned/untuned.
+- [x] The constant-time cost showed up on ARM64 too, and larger than on x86-64: aggregate
+      1.01× → 1.04×, driven by `ecdsa_sign` 0.99× → 1.06× and `ecdh` 1.02× → 1.08×.
+      Recorded in the README rather than absorbed.
+- [x] **Tuning helps ARM64 much less than x86-64, and the reason is structural.** On x86-64
+      `-march=native` moved the aggregate 1.05× → 0.98× because upstream's hand-written
+      scalar assembly does not benefit from it while this implementation's portable Odin
+      does. ARM64 has no upstream assembly, so both sides are C-vs-Odin and both speed up
+      together: 1.04× → 1.01×, a real but smaller gain.
+- [x] **Start-up re-measured on Apple silicon**: 10.2 ms → 5.1 ms median over 20 launches,
+      so the table build costs about 5 ms there against ~7 ms on x86-64. Both rows carry
+      roughly 4 ms of macOS `fork`/`exec` overhead, so the difference is the figure to read;
+      the README says so rather than publishing the absolutes as if they were comparable.
 - [x] Report both architectures separately; do not average them — `README.md` now carries
       two tables and states which is which.
 

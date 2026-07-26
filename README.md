@@ -106,13 +106,42 @@ Tuned, both verify paths and key generation come out ahead of C and ECDH is at p
 `ecdsa_sign` is the one consistent laggard; the scalar inversion and RFC6979 derivation that
 distinguish it from Schnorr signing have not yet been profiled apart.
 
+**ARM64 (Apple silicon), both sides at default `-O2`:**
+
+| operation | odin µs | c µs | ratio |
+|---|---:|---:|---:|
+| `ec_pubkey_create` | 13.20 | 13.29 | **0.99×** |
+| `schnorrsig_sign` | 14.21 | 14.38 | **0.99×** |
+| `schnorrsig_verify` | 24.03 | 22.97 | 1.05× |
+| `ecdsa_verify` | 24.02 | 22.82 | 1.05× |
+| `ecdsa_sign` | 21.37 | 20.23 | 1.06× |
+| `ecdh` | 29.24 | 26.99 | 1.08× |
+| **aggregate** | | | **1.04×** |
+
+**ARM64, both tuned** (`-microarch:native` / `-mcpu=native`):
+
+| operation | odin µs | c µs | ratio |
+|---|---:|---:|---:|
+| `ec_pubkey_create` | 13.01 | 13.45 | **0.97×** |
+| `schnorrsig_sign` | 14.11 | 14.51 | **0.97×** |
+| `ecdsa_verify` | 23.24 | 22.98 | 1.01× |
+| `schnorrsig_verify` | 23.32 | 23.13 | 1.01× |
+| `ecdh` | 28.42 | 27.28 | 1.04× |
+| `ecdsa_sign` | 21.20 | 20.29 | 1.05× |
+| **aggregate** | | | **1.01×** |
+
+Three consecutive runs of each; every row within ±0.02 and the aggregate within ±0.01.
+
 **Report the architecture, and never average two.** On x86-64 upstream enables hand-written
 assembly for scalar reduction, so that comparison is Odin-vs-asm for scalar work and
-Odin-vs-C elsewhere; on ARM64 upstream ships none. **The ARM64 figures are stale** — they
-predate the constant-time fixes and cannot be re-measured on this machine; see `TODO.md`.
+Odin-vs-C elsewhere; on ARM64 upstream ships none, so every ARM64 row is Odin-vs-C. That is
+why ARM64 shows no tuned win on the verify paths while x86-64 does: there is no assembly for
+`-mcpu=native` to compete against, only C that gets faster alongside.
 
-These numbers include the cost of the constant-time work, which is real: `schnorrsig_sign`
-moved from 0.96× to 1.00× over the course of those fixes.
+These numbers include the cost of the constant-time work, which is real and was measured
+rather than absorbed. On ARM64 the aggregate moved 1.01× → 1.04× across those fixes, with
+`ecdsa_sign` 0.99× → 1.06× and `ecdh` 1.02× → 1.08× taking most of it. That is the trade this
+project exists to make, but it is a cost.
 
 ### Start-up
 
@@ -124,10 +153,14 @@ a short-lived process is dominated by.
 commits a generated C file holding the table as `static const`, so it lands in `.rodata` and
 the loader maps it from the binary.
 
-| sign + verify, one process | time | binary |
-|---|---:|---:|
-| embedded (default) | **1 ms** | 1.37 MB |
-| `-define:SECP256K1_EMBED_TABLES=false` | 8 ms | 331 KB |
+| sign + verify, one process | x86-64 | ARM64 | binary |
+|---|---:|---:|---:|
+| embedded (default) | **1 ms** | **5.1 ms** | 1.37 MB |
+| `-define:SECP256K1_EMBED_TABLES=false` | 8 ms | 10.2 ms | 331 KB |
+
+The ARM64 figures are medians over 20 process launches and carry roughly 4 ms of macOS
+`fork`/`exec` overhead in both rows, so the table build itself costs about **5 ms** there —
+the *difference* is the number to read, not the absolute.
 
 Odin has no compile-time execution, so the compiler cannot *compute* the table.
 `precompute_ecmult/` generates `ecmult/pre_g.bin` and `#load` embeds it, reinterpreted in

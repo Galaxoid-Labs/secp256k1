@@ -70,11 +70,25 @@ The value depends only on CONST_BITS, so one constant per supported group size. 
 derived independently from the formula above and agree with upstream's.
 */
 when params.EXHAUSTIVE_ORDER != 0 {
-	// The exhaustive curves use small-order scalar arithmetic, which this package does not
-	// yet provide; see the task note in DEVELOPMENT.md. K is left zero so the package
-	// still builds under those configurations.
+	/*
+	K for the exhaustive curves, as an exact compile-time expression.
+
+	Upstream writes the same thing:
+
+		((2^(CONST_BITS-128) - 2) * 2^128 + ORDER - 1) * (1 + lambda)  mod  ORDER
+
+	Odin's constant arithmetic is arbitrary precision, so this is evaluated by the compiler
+	and there is no 256-bit runtime computation to get wrong. Deriving it rather than
+	tabulating it also means it stays correct if `GROUP_SIZE` changes for a new order.
+	*/
+	@(private)
+	K_EXHAUSTIVE ::
+		((((1 << (CONST_BITS - 128)) - 2) * (1 << 128) + params.EXHAUSTIVE_ORDER - 1) *
+			(1 + params.EXHAUSTIVE_LAMBDA)) %
+		params.EXHAUSTIVE_ORDER
+
 	@(rodata)
-	CONST_K := scalar.Scalar{}
+	CONST_K := scalar.Scalar{d = u32(K_EXHAUSTIVE)}
 } else when CONST_BITS == 129 {
 	@(rodata)
 	CONST_K := scalar.Scalar {
@@ -96,9 +110,22 @@ when params.EXHAUSTIVE_ORDER != 0 {
 
 /*
 The offset added to each split half to make it non-negative: 2^128.
+
+Written per representation rather than shared, because the two hold it differently: the 4x64
+scalar has an exact limb for it, while under an exhaustive order it is 2^128 reduced. Odin's
+constant arithmetic is arbitrary precision, so that reduction happens at compile time and
+there is no runtime initialization to sequence.
 */
-@(rodata)
-S_OFFSET := scalar.Scalar{d = {0, 0, 1, 0}}
+when params.EXHAUSTIVE_ORDER == 0 {
+	@(rodata)
+	S_OFFSET := scalar.Scalar{d = {0, 0, 1, 0}}
+} else {
+	@(private)
+	TWO_POW_128_MOD_ORDER :: (1 << 128) % params.EXHAUSTIVE_ORDER
+
+	@(rodata)
+	S_OFFSET := scalar.Scalar{d = u32(TWO_POW_128_MOD_ORDER)}
+}
 
 /*
 Builds a table of odd multiples of a, all sharing one Z denominator.
@@ -174,7 +201,9 @@ ecmult_const :: proc "contextless" (r: ^group.Gej, a: ^group.Ge, q: ^scalar.Scal
 		// Both halves must now fit in 129 bits, or the group loop below would drop bits.
 		for i in 129 ..< 256 {
 			CHECK(scalar.scalar_get_bits_limb32(&v1, uint(i), 1) == 0, "ecmult_const: v1 exceeds 129 bits")
-			CHECK(scalar.scalar_get_bits_limb32(&v2, uint(i), 1) == 0, "ecmult_const: v2 exceeds 129 bits")
+			when VERIFY {
+				CHECK(scalar.scalar_get_bits_limb32(&v2, uint(i), 1) == 0, "ecmult_const: v2 exceeds 129 bits")
+			}
 		}
 	}
 

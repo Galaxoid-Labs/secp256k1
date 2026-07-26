@@ -21,3 +21,4 @@ package tests
 @(require) import _ "./ecdh_recovery"
 @(require) import _ "./ellswift"
 @(require) import _ "./musig"
+@(require) import _ "./misc"

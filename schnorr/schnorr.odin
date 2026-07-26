@@ -41,6 +41,7 @@ different key cannot produce a colliding nonce.
 package schnorr
 
 import "core:mem"
+import "../ct"
 import "../ecmult"
 import "../extrakeys"
 import "../field"
@@ -249,7 +250,11 @@ sign :: proc "contextless" (
 	group.ge_set_gej(&r, &rj)
 
 	// R is public — its x coordinate becomes half the signature — so branching on its
-	// parity here leaks nothing.
+	// parity here leaks nothing. It has to be said explicitly for the constant-time harness,
+	// which otherwise sees only that R was derived from a secret nonce. Upstream declassifies
+	// exactly here, with the same justification.
+	ct.declassify(&r, size_of(r))
+
 	field.fe_normalize_var(&r.y)
 	if field.fe_is_odd(&r.y) {
 		scalar.scalar_negate(&k, &k)
@@ -267,6 +272,8 @@ sign :: proc "contextless" (
 	s32 := (^[32]u8)(&sig64[32])
 	scalar.scalar_get_b32(s32, &e)
 
+	// Whether signing succeeded is returned to the caller, so it is public from here.
+	ct.declassify(&ok, size_of(ok))
 	if !ok {
 		mem.zero_explicit(sig64, size_of(sig64))
 	}

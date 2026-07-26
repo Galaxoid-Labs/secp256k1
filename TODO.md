@@ -355,7 +355,11 @@ valgrind --error-exitcode=1 ./ct_tests.bin
       are not secret, and ellswift aux randomness is not secret.
 - [ ] Per-symbol coverage attribution. Callgrind undercounts because `#force_inline` symbols
       are absorbed into callers, so the arithmetic under the verified paths is covered in
-      fact but cannot yet be *shown* per symbol.
+      fact but cannot yet be *shown* per symbol. `TRUST.md` now distinguishes this case
+      explicitly as `ct-covered` rather than lumping it in with untested code.
+- [ ] Drive the two remaining `ct-untested` symbols: `ecdsa.sig_sign` (the caller-supplied
+      nonce entry point) and `eckey.privkey_tweak_mul`. Both are ordinary extensions of
+      `ct_tests/`, not design problems.
 
 The statistical (dudect) test runs on macOS and is currently clean, but it measures
 wall-clock time and cannot see leaks that never reach the clock. It is evidence, not the

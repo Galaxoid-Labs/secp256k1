@@ -5,18 +5,45 @@ column has been compared byte-for-byte against upstream libsecp256k1 over thousa
 fuzzed inputs. That is the strongest correctness evidence in this project — stronger than
 any hand-written vector, because the inputs are not chosen. It says nothing about timing.
 
-Two states, per `CLAUDE.md`:
+## Reading the status column
 
-- **`unverified`** — correct on vectors, but not yet cleared by the constant-time harness.
-- **`ct-verified`** — zero valgrind constant-time findings across its secret paths.
+`CLAUDE.md` defines two states, `unverified` and `ct-verified`. In practice one word was
+carrying three unrelated meanings — "not yet checked", "nothing to check", and "checked but
+not separately attributable" — which made the table read far worse than the situation was.
+It is split into four:
+
+| status | meaning |
+|---|---|
+| **`ct-verified`** | Driven directly by `ct_tests/` under valgrind, zero findings. |
+| `ct-covered` | Executes *inside* a `ct-verified` path, so it ran clean — but is `#force_inline`d, so valgrind cannot attribute it separately. |
+| `public` | Variable-time by design, or handles only public data. There is no secret here to leak, so the constant-time question does not apply. |
+| **`ct-untested`** | On a secret path and **not** exercised by the harness. This is the only status that names a gap. |
+
+Counts: **12 `ct-verified`**, 76 `ct-covered`, 61 `public`, **2 `ct-untested`**.
+
+**Why `ct-covered` is not `ct-verified`.** The field, scalar and group primitives are
+`#force_inline` — that is what took the library from 1.07× to 1.01× of C — and an inlined
+procedure is absorbed into its caller and never appears as a call target. When valgrind
+reports zero findings for `ecdsa.sign`, `fe_mul` demonstrably ran clean thousands of times
+inside it, but there is no symbol boundary left to attribute that to. Callgrind was tried and
+undercounts for exactly this reason.
+
+Promoting those rows would mean inferring constant-time status from evidence that cannot
+distinguish "ran clean" from "never ran" — and inference about constant-time behaviour is
+precisely what Phase 8 exists to replace. So they stay `ct-covered` until per-symbol coverage
+can be *shown*. That is the one open item in `TODO.md` §8.
+
+**Why `public` is not a weaker `ct-verified`.** `CLAUDE.md` says public-data paths reach
+`ct-verified` trivially once their vectors pass. That is true but not useful to write down:
+it would mean "we checked there are no secrets", which is a different claim wearing the same
+word. `ecmult`, `fe_normalize_var` and `ecdsa.verify` are *deliberately* data-dependent, and
+calling them verified invites someone to reach for one on a secret.
 
 "Verified" means it meets *this project's* bar, defined below. It does not mean audited, and
 no row here should be read as one — this library is provided as is, without warranty.
 
-Public-data paths — verify, recovery, ellswift decode, key and address derivation — reach
-`ct-verified` trivially once their vectors pass, because they have no secrets to leak.
-Secret paths stay `unverified` until the Phase 8 harness clears them. MuSig2 signing is the
-last to graduate, and its nonce handling is the highest-risk code in the project.
+MuSig2 signing was the last to graduate; its nonce handling is the highest-risk code in the
+project and is now `ct-verified` on both `nonce_gen` and `partial_sign`.
 
 **Constant-time status.** Two independent checks:
 
@@ -81,13 +108,9 @@ transitively execute:
 `extrakeys.keypair_create` + `keypair_xonly_tweak_add`, `musig.pubkey_{xonly,ec}_tweak_add`,
 `recovery.sign_recoverable`, and `ellswift.create` + `ellswift.xdh`.
 
-Per-symbol attribution below is deliberately *not* claimed from this run. Callgrind was used
-to enumerate the executed set and undercounts badly, because `#force_inline` symbols are
-absorbed into their callers and never appear as call targets. Rather than mark rows
-`ct-verified` on evidence that does not distinguish "not executed" from "inlined", the
-status column changes only for the entry points above. The arithmetic they rest on is
-covered in fact but is left `unverified` here until per-symbol coverage can be shown rather
-than inferred.
+Per-symbol attribution is deliberately *not* claimed from this run, for the reason given
+under "Reading the status column": the arithmetic these paths rest on is `ct-covered`, not
+`ct-verified`.
 
 Extending the harness to those last four paths found three more defects of the same kind:
 `keypair_create` and `ellswift.create` early-returned on an invalid key, and
@@ -112,37 +135,37 @@ so every entry here needs a `ctime_tests` case in Phase 8.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `fe_normalize` | unverified | ✅ | ✅ | constant-time by construction; unproven |
-| `fe_normalize_weak` | unverified | ✅ | ✅ | |
-| `fe_normalize_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `fe_normalizes_to_zero` | unverified | ✅ | ✅ | |
-| `fe_normalizes_to_zero_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `fe_set_int` | unverified | ✅ | ✅ | |
-| `fe_is_zero` | unverified | ✅ | ✅ | |
-| `fe_is_odd` | unverified | ✅ | ✅ | |
-| `fe_get_bounds` | unverified | ✅ | ✅ | test support |
-| `fe_const` | unverified | ✅ | ✅ | constant construction |
-| `fe_clear` | unverified | ✅ | ✅ | explicit wipe via `mem.zero_explicit` |
-| `fe_add` | unverified | ✅ | ✅ | |
-| `fe_add_int` | unverified | ✅ | ✅ | |
-| `fe_negate` | unverified | ✅ | ✅ | |
-| `fe_mul_int` | unverified | ✅ | ✅ | |
-| `fe_half` | unverified | ✅ | ✅ | mask derived arithmetically, not by branch |
-| `fe_cmov` | unverified | ✅ | ✅ | |
-| `fe_cmp_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `fe_equal` | unverified | ✅ | ✅ | |
-| `fe_mul` | unverified | ✅ | ✅ | known-answer vectors pass |
-| `fe_sqr` | unverified | ✅ | ✅ | known-answer vectors pass |
-| `fe_to_storage` | unverified | ✅ | ✅ | |
-| `fe_from_storage` | unverified | ✅ | ✅ | |
-| `fe_storage_cmov` | unverified | ✅ | ✅ | |
-| `fe_set_b32_mod` | unverified | ✅ | ✅ | |
-| `fe_set_b32_limit` | unverified | ✅ | ✅ | |
-| `fe_get_b32` | unverified | ✅ | ✅ | |
-| `fe_inv` | unverified | ✅ | ✅ | safegcd `modinv64`; on the verified signing paths |
-| `fe_inv_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `fe_sqrt` | unverified | ✅ | ✅ | used by point decompression, a public-data path |
-| `fe_is_square_var` | unverified | ✅ | ✅ | variable-time by design; public data only |
+| `fe_normalize` | ct-covered | ✅ | ✅ | constant-time by construction; unproven |
+| `fe_normalize_weak` | ct-covered | ✅ | ✅ | |
+| `fe_normalize_var` | public | ✅ | ✅ | variable-time by design; public data only |
+| `fe_normalizes_to_zero` | ct-covered | ✅ | ✅ | |
+| `fe_normalizes_to_zero_var` | public | ✅ | ✅ | variable-time by design; public data only |
+| `fe_set_int` | ct-covered | ✅ | ✅ | |
+| `fe_is_zero` | ct-covered | ✅ | ✅ | |
+| `fe_is_odd` | ct-covered | ✅ | ✅ | |
+| `fe_get_bounds` | public | ✅ | ✅ | test support |
+| `fe_const` | ct-covered | ✅ | ✅ | constant construction |
+| `fe_clear` | ct-covered | ✅ | ✅ | explicit wipe via `mem.zero_explicit` |
+| `fe_add` | ct-covered | ✅ | ✅ | |
+| `fe_add_int` | ct-covered | ✅ | ✅ | |
+| `fe_negate` | ct-covered | ✅ | ✅ | |
+| `fe_mul_int` | ct-covered | ✅ | ✅ | |
+| `fe_half` | ct-covered | ✅ | ✅ | mask derived arithmetically, not by branch |
+| `fe_cmov` | ct-covered | ✅ | ✅ | |
+| `fe_cmp_var` | public | ✅ | ✅ | variable-time by design; public data only |
+| `fe_equal` | ct-covered | ✅ | ✅ | |
+| `fe_mul` | ct-covered | ✅ | ✅ | known-answer vectors pass |
+| `fe_sqr` | ct-covered | ✅ | ✅ | known-answer vectors pass |
+| `fe_to_storage` | ct-covered | ✅ | ✅ | |
+| `fe_from_storage` | ct-covered | ✅ | ✅ | |
+| `fe_storage_cmov` | ct-covered | ✅ | ✅ | |
+| `fe_set_b32_mod` | ct-covered | ✅ | ✅ | |
+| `fe_set_b32_limit` | ct-covered | ✅ | ✅ | |
+| `fe_get_b32` | ct-covered | ✅ | ✅ | |
+| `fe_inv` | ct-covered | ✅ | ✅ | safegcd `modinv64`; on the verified signing paths |
+| `fe_inv_var` | public | ✅ | ✅ | variable-time by design; public data only |
+| `fe_sqrt` | public | ✅ | ✅ | used by point decompression, a public-data path |
+| `fe_is_square_var` | public | ✅ | ✅ | variable-time by design; public data only |
 
 "Vectors ✅" here means the tier 2 mirrored suite and the known-answer vectors pass in both
 release and `-debug` builds. The Phase 9 differential oracle is now also running and reports
@@ -157,28 +180,28 @@ nonce are both scalars — so every constant-time entry here is a Phase 8 requir
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `scalar_set_int`, `scalar_const` | unverified | ✅ | ✅ | |
-| `scalar_clear` | unverified | ✅ | ✅ | explicit wipe |
-| `scalar_set_b32` | unverified | ✅ | ✅ | |
-| `scalar_set_b32_seckey` | unverified | ✅ | ✅ | rejects 0 and >= n |
-| `scalar_get_b32` | unverified | ✅ | ✅ | |
-| `scalar_check_overflow` | unverified | ✅ | ✅ | branch-free comparison |
-| `scalar_reduce` | unverified | ✅ | ✅ | |
-| `scalar_add` | unverified | ✅ | ✅ | |
-| `scalar_cadd_bit` | unverified | ✅ | ✅ | |
-| `scalar_negate` | unverified | ✅ | ✅ | |
-| `scalar_cond_negate` | unverified | ✅ | ✅ | |
-| `scalar_half` | unverified | ✅ | ✅ | |
-| `scalar_mul` | unverified | ✅ | ✅ | known-answer vectors pass |
-| `scalar_mul_shift_var` | unverified | ✅ | ✅ | constant-time for constant shift |
-| `scalar_inverse` | unverified | ✅ | ✅ | via safegcd |
-| `scalar_inverse_var` | unverified | ✅ | ✅ | variable-time by design |
-| `scalar_is_zero`, `_is_one`, `_is_even` | unverified | ✅ | ✅ | |
-| `scalar_is_high` | unverified | ✅ | ✅ | low-S boundary tested at exactly n/2 |
-| `scalar_eq`, `scalar_cmov` | unverified | ✅ | ✅ | |
-| `scalar_split_lambda` | unverified | ✅ | ✅ | bounds asserted under -debug |
-| `scalar_get_bits_limb32`, `_var` | unverified | ✅ | ✅ | |
-| `scalar_split_128` | unverified | ✅ | ✅ | |
+| `scalar_set_int`, `scalar_const` | ct-covered | ✅ | ✅ | |
+| `scalar_clear` | ct-covered | ✅ | ✅ | explicit wipe |
+| `scalar_set_b32` | ct-covered | ✅ | ✅ | |
+| `scalar_set_b32_seckey` | ct-covered | ✅ | ✅ | rejects 0 and >= n |
+| `scalar_get_b32` | ct-covered | ✅ | ✅ | |
+| `scalar_check_overflow` | ct-covered | ✅ | ✅ | branch-free comparison |
+| `scalar_reduce` | ct-covered | ✅ | ✅ | |
+| `scalar_add` | ct-covered | ✅ | ✅ | |
+| `scalar_cadd_bit` | ct-covered | ✅ | ✅ | |
+| `scalar_negate` | ct-covered | ✅ | ✅ | |
+| `scalar_cond_negate` | ct-covered | ✅ | ✅ | |
+| `scalar_half` | ct-covered | ✅ | ✅ | |
+| `scalar_mul` | ct-covered | ✅ | ✅ | known-answer vectors pass |
+| `scalar_mul_shift_var` | ct-covered | ✅ | ✅ | constant-time for constant shift |
+| `scalar_inverse` | ct-covered | ✅ | ✅ | via safegcd |
+| `scalar_inverse_var` | public | ✅ | ✅ | variable-time by design |
+| `scalar_is_zero`, `_is_one`, `_is_even` | ct-covered | ✅ | ✅ | |
+| `scalar_is_high` | ct-covered | ✅ | ✅ | low-S boundary tested at exactly n/2 |
+| `scalar_eq`, `scalar_cmov` | ct-covered | ✅ | ✅ | |
+| `scalar_split_lambda` | ct-covered | ✅ | ✅ | bounds asserted under -debug |
+| `scalar_get_bits_limb32`, `_var` | public | ✅ | ✅ | |
+| `scalar_split_128` | ct-covered | ✅ | ✅ | |
 
 ## modinv
 
@@ -187,13 +210,13 @@ that inverts anything.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `modinv64` | unverified | ✅ | ✅ | constant-time in x, not in the modulus |
-| `modinv64_var` | unverified | ✅ | ✅ | variable-time by design |
-| `jacobi64_maybe_var` | unverified | ✅ | ✅ | may return 0 = "unknown"; callers must handle |
-| `normalize_62` | unverified | ✅ | ✅ | |
-| `divsteps_59` | unverified | ✅ | ✅ | mask arithmetic unproven against compiler branching |
-| `divsteps_62_var`, `posdivsteps_62_var` | unverified | ✅ | ✅ | variable-time by design |
-| `update_de_62`, `update_fg_62{,_var}` | unverified | ✅ | ✅ | |
+| `modinv64` | ct-covered | ✅ | ✅ | constant-time in x, not in the modulus |
+| `modinv64_var` | public | ✅ | ✅ | variable-time by design |
+| `jacobi64_maybe_var` | public | ✅ | ✅ | may return 0 = "unknown"; callers must handle |
+| `normalize_62` | ct-covered | ✅ | ✅ | |
+| `divsteps_59` | ct-covered | ✅ | ✅ | mask arithmetic unproven against compiler branching |
+| `divsteps_62_var`, `posdivsteps_62_var` | public | ✅ | ✅ | variable-time by design |
+| `update_de_62`, `update_fg_62{,_var}` | ct-covered | ✅ | ✅ | |
 
 Odin has no `volatile`, which upstream uses to stop the compiler turning mask arithmetic
 into branches. Nothing here asserts that it did not; the Phase 8 harness is what will.
@@ -205,29 +228,29 @@ constant-time/variable-time split here is the one that matters most.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `ge_set_xy`, `ge_set_infinity` | unverified | ✅ | ✅ | |
-| `gej_set_infinity`, `gej_set_ge` | unverified | ✅ | ✅ | |
-| `ge_clear`, `gej_clear` | unverified | ✅ | ✅ | explicit wipe |
-| `ge_neg`, `gej_neg` | unverified | ✅ | ✅ | |
-| `ge_set_gej` | unverified | ✅ | ✅ | constant-time conversion |
-| `ge_set_gej_var` | unverified | ✅ | ✅ | variable-time by design |
-| `ge_set_gej_zinv`, `ge_set_ge_zinv` | unverified | ✅ | ✅ | |
-| `ge_set_all_gej` | unverified | ✅ | ✅ | batched inversion |
-| `ge_set_all_gej_var` | unverified | ✅ | ✅ | variable-time by design |
-| `ge_table_set_globalz` | unverified | ✅ | ✅ | |
-| `ge_set_xo_var` (lift_x) | unverified | ✅ | ✅ | variable-time; x is public |
-| `ge_is_valid_var` | unverified | ✅ | ✅ | |
-| `ge_x_on_curve_var`, `ge_x_frac_on_curve_var` | unverified | ✅ | ✅ | |
-| `gej_double` | unverified | ✅ | ✅ | constant-time |
-| `gej_double_var` | unverified | ✅ | ✅ | variable-time by design |
-| `gej_add_var`, `gej_add_ge_var`, `gej_add_zinv_var` | unverified | ✅ | ✅ | variable-time by design |
-| **`gej_add_ge`** | unverified | ✅ | ✅ | the constant-time unified formula; degenerate branch now covered |
-| `gej_rescale` | unverified | ✅ | ✅ | projective blinding |
-| `gej_cmov` | unverified | ✅ | ✅ | |
-| `ge_to_storage`, `ge_from_storage`, `ge_storage_cmov` | unverified | ✅ | ✅ | |
-| `ge_mul_lambda` | unverified | ✅ | ✅ | endomorphism |
-| `ge_eq_var`, `gej_eq_var`, `gej_eq_ge_var`, `gej_eq_x_var` | unverified | ✅ | ✅ | variable-time by design |
-| `ge_is_in_correct_subgroup` | unverified | ✅ | ✅ | trivial on the real curve (cofactor 1) |
+| `ge_set_xy`, `ge_set_infinity` | ct-covered | ✅ | ✅ | |
+| `gej_set_infinity`, `gej_set_ge` | ct-covered | ✅ | ✅ | |
+| `ge_clear`, `gej_clear` | ct-covered | ✅ | ✅ | explicit wipe |
+| `ge_neg`, `gej_neg` | ct-covered | ✅ | ✅ | |
+| `ge_set_gej` | ct-covered | ✅ | ✅ | constant-time conversion |
+| `ge_set_gej_var` | public | ✅ | ✅ | variable-time by design |
+| `ge_set_gej_zinv`, `ge_set_ge_zinv` | ct-covered | ✅ | ✅ | |
+| `ge_set_all_gej` | ct-covered | ✅ | ✅ | batched inversion |
+| `ge_set_all_gej_var` | public | ✅ | ✅ | variable-time by design |
+| `ge_table_set_globalz` | ct-covered | ✅ | ✅ | |
+| `ge_set_xo_var` (lift_x) | public | ✅ | ✅ | variable-time; x is public |
+| `ge_is_valid_var` | public | ✅ | ✅ | |
+| `ge_x_on_curve_var`, `ge_x_frac_on_curve_var` | public | ✅ | ✅ | |
+| `gej_double` | ct-covered | ✅ | ✅ | constant-time |
+| `gej_double_var` | public | ✅ | ✅ | variable-time by design |
+| `gej_add_var`, `gej_add_ge_var`, `gej_add_zinv_var` | public | ✅ | ✅ | variable-time by design |
+| **`gej_add_ge`** | ct-covered | ✅ | ✅ | the constant-time unified formula; degenerate branch now covered |
+| `gej_rescale` | ct-covered | ✅ | ✅ | projective blinding |
+| `gej_cmov` | ct-covered | ✅ | ✅ | |
+| `ge_to_storage`, `ge_from_storage`, `ge_storage_cmov` | public | ✅ | ✅ | |
+| `ge_mul_lambda` | ct-covered | ✅ | ✅ | endomorphism |
+| `ge_eq_var`, `gej_eq_var`, `gej_eq_ge_var`, `gej_eq_x_var` | public | ✅ | ✅ | variable-time by design |
+| `ge_is_in_correct_subgroup` | public | ✅ | ✅ | trivial on the real curve (cofactor 1) |
 
 `gej_add_ge` is the highest-risk routine in this package. Its degenerate branch — y1 = -y2
 with x1 != x2 — was untested until a surviving mutation exposed the gap; see `TESTING.md`.
@@ -239,17 +262,17 @@ Phase 4. The engine split is the single most important security boundary in the 
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `ecmult` | unverified | ✅ | ✅ | **variable-time by design; public scalars only** |
-| `ecmult_multi_var` | unverified | ✅ | ✅ | variable-time by design |
-| `ecmult_const` | unverified | ✅ | ✅ | constant-time; the secret-scalar path |
-| `ecmult_gen` | unverified | ✅ | ✅ | constant-time, scalar- and projective-blinded |
-| `wnaf`, `wnaf_small` | unverified | ✅ | ✅ | variable-time by design |
-| `odd_multiples_table` | unverified | ✅ | ✅ | |
-| `table_get_ge{,_lambda,_storage}` | unverified | ✅ | ✅ | variable-time index; public data |
-| `compute_table`, `compute_two_tables` | unverified | ✅ | ✅ | entries verified against independent multiples |
-| `gen_compute_table` | unverified | ✅ | ✅ | entries verified non-infinite and on-curve |
-| `ecmult_gen_context_build` | unverified | ✅ | ✅ | unblinded reset (b = -1) |
-| `ecmult_gen_blind` | unverified | ✅ | ✅ | RFC6979-derived, entropy-chaining |
+| `ecmult` | public | ✅ | ✅ | **variable-time by design; public scalars only** |
+| `ecmult_multi_var` | public | ✅ | ✅ | variable-time by design |
+| `ecmult_const` | ct-covered | ✅ | ✅ | constant-time; the secret-scalar path |
+| `ecmult_gen` | ct-covered | ✅ | ✅ | constant-time, scalar- and projective-blinded |
+| `wnaf`, `wnaf_small` | public | ✅ | ✅ | variable-time by design |
+| `odd_multiples_table` | ct-covered | ✅ | ✅ | |
+| `table_get_ge{,_lambda,_storage}` | public | ✅ | ✅ | variable-time index; public data |
+| `compute_table`, `compute_two_tables` | public | ✅ | ✅ | entries verified against independent multiples |
+| `gen_compute_table` | public | ✅ | ✅ | entries verified non-infinite and on-curve |
+| `ecmult_gen_context_build` | public | ✅ | ✅ | unblinded reset (b = -1) |
+| `ecmult_gen_blind` | ct-covered | ✅ | ✅ | RFC6979-derived, entropy-chaining |
 
 Blinding is in place as of Phase 5. A context is unblinded until `context_randomize` is
 called, which is the caller's responsibility and is documented on that procedure.
@@ -261,10 +284,10 @@ blinding.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `sha256_*` | unverified | ✅ | ✅ | NIST FIPS 180-2 vectors pass |
-| `hmac_sha256_*` | unverified | ✅ | ✅ | RFC 4231 vectors pass |
-| `rfc6979_hmac_sha256_*` | unverified | ✅ | ✅ | verified against an independent reference |
-| `sha256_initialize_tagged`, `tagged_sha256` | unverified | ✅ | ✅ | BIP340 domain separation checked |
+| `sha256_*` | ct-covered | ✅ | ✅ | NIST FIPS 180-2 vectors pass |
+| `hmac_sha256_*` | ct-covered | ✅ | ✅ | RFC 4231 vectors pass |
+| `rfc6979_hmac_sha256_*` | ct-covered | ✅ | ✅ | verified against an independent reference |
+| `sha256_initialize_tagged`, `tagged_sha256` | ct-covered | ✅ | ✅ | BIP340 domain separation checked |
 
 ## ctx
 
@@ -272,11 +295,11 @@ Phase 5. Named `ctx` rather than `context` because `context` is reserved in Odin
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `context_create`, `context_destroy` | unverified | ✅ | ✅ | |
-| `context_randomize` | unverified | ✅ | ✅ | installs blinding; refuses on an immutable context |
-| `context_set_illegal_callback` | unverified | ✅ | ✅ | |
-| `context_set_error_callback` | unverified | ✅ | ✅ | |
-| `arg_check`, `call_illegal`, `call_error` | unverified | ✅ | ✅ | default handlers abort, matching upstream |
+| `context_create`, `context_destroy` | public | ✅ | ✅ | |
+| `context_randomize` | ct-covered | ✅ | ✅ | installs blinding; refuses on an immutable context |
+| `context_set_illegal_callback` | public | ✅ | ✅ | |
+| `context_set_error_callback` | public | ✅ | ✅ | |
+| `arg_check`, `call_illegal`, `call_error` | public | ✅ | ✅ | default handlers abort, matching upstream |
 
 ## eckey
 
@@ -284,12 +307,13 @@ Phase 6. Key encoding and tweaking.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `pubkey_parse` | unverified | ✅ | ✅ | rejects out-of-range, off-curve and inconsistent hybrid tags |
-| `pubkey_serialize33`, `pubkey_serialize65` | unverified | ✅ | ✅ | |
+| `pubkey_parse` | public | ✅ | ✅ | rejects out-of-range, off-curve and inconsistent hybrid tags |
+| `pubkey_serialize33`, `pubkey_serialize65` | public | ✅ | ✅ | |
 | `pubkey_create` | **ct-verified** | ✅ | ✅ | uses blinded `ecmult_gen`; valgrind clean, no branch on key validity |
-| `privkey_tweak_add`, `privkey_tweak_mul` | **ct-verified** | ✅ | ✅ | reject results that would be invalid keys; `_add` valgrind clean |
-| `pubkey_tweak_add`, `pubkey_tweak_mul` | unverified | ✅ | ✅ | |
-| `pubkey_negate` | unverified | ✅ | ✅ | |
+| `privkey_tweak_add` | **ct-verified** | ✅ | ✅ | rejects a zero result; driven by the harness, valgrind clean |
+| `privkey_tweak_mul` | **ct-untested** | ✅ | ✅ | same shape as `_add` but not driven by the harness |
+| `pubkey_tweak_add`, `pubkey_tweak_mul` | public | ✅ | ✅ | |
+| `pubkey_negate` | public | ✅ | ✅ | |
 
 ## ecdsa
 
@@ -298,13 +322,13 @@ Phase 6. Signing is on the secret path; verification is entirely public.
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
 | `sign` | **ct-verified** | ✅ | ✅ | RFC6979 nonce; exact-match vectors from an independent reference; valgrind clean |
-| `sig_sign` | unverified | ✅ | ✅ | caller-supplied nonce |
-| `verify`, `sig_verify` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `nonce_function_rfc6979` | unverified | ✅ | ✅ | fixed-length fields prevent input confusion |
-| `signature_normalize` | unverified | ✅ | ✅ | low-S canonicalisation |
-| `signature_serialize_compact`, `signature_parse_compact` | unverified | ✅ | ✅ | rejects out-of-range halves |
-| `signature_serialize_der`, `signature_parse_der` | unverified | ✅ | ✅ | strict; rejects non-canonical encodings |
-| `signature_parse_der_lax` | unverified | ✅ | ✅ | **legacy data only**; reintroduces encoding malleability |
+| `sig_sign` | **ct-untested** | ✅ | ✅ | caller-supplied nonce |
+| `verify`, `sig_verify` | public | ✅ | ✅ | variable-time by design; public data only |
+| `nonce_function_rfc6979` | ct-covered | ✅ | ✅ | fixed-length fields prevent input confusion |
+| `signature_normalize` | public | ✅ | ✅ | low-S canonicalisation |
+| `signature_serialize_compact`, `signature_parse_compact` | public | ✅ | ✅ | rejects out-of-range halves |
+| `signature_serialize_der`, `signature_parse_der` | public | ✅ | ✅ | strict; rejects non-canonical encodings |
+| `signature_parse_der_lax` | public | ✅ | ✅ | **legacy data only**; reintroduces encoding malleability |
 
 Not yet covered: the full Wycheproof corpus (Phase 6 gate) and the differential oracle
 (Phase 9). Until Wycheproof runs, the claim is "passes independently computed vectors and
@@ -316,13 +340,14 @@ Phase 6. X-only keys and parity bookkeeping for BIP340 and Taproot.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `ge_even_y` | unverified | ✅ | ✅ | reports the parity a caller must track |
-| `xonly_pubkey_parse`, `_serialize` | unverified | ✅ | ✅ | rejects x >= p and off-curve x |
-| `xonly_pubkey_from_pubkey` | unverified | ✅ | ✅ | |
-| `xonly_pubkey_cmp` | unverified | ✅ | ✅ | needed for MuSig2 key sorting |
-| `xonly_pubkey_tweak_add`, `_check` | unverified | ✅ | ✅ | Taproot output key |
-| `keypair_create`, `_sec`, `_pub`, `_xonly_pub` | unverified | ✅ | ✅ | |
-| `keypair_xonly_tweak_add` | unverified | ✅ | ✅ | secret negated to match even-y; consistency tested |
+| `ge_even_y` | ct-covered | ✅ | ✅ | reports the parity a caller must track |
+| `xonly_pubkey_parse`, `_serialize` | public | ✅ | ✅ | rejects x >= p and off-curve x |
+| `xonly_pubkey_from_pubkey` | public | ✅ | ✅ | |
+| `xonly_pubkey_cmp` | public | ✅ | ✅ | needed for MuSig2 key sorting |
+| `xonly_pubkey_tweak_add`, `_check` | public | ✅ | ✅ | Taproot output key |
+| `keypair_create` | **ct-verified** | ✅ | ✅ | constant-time erase on failure via `ct.czero`; | |
+| `keypair_sec`, `_pub`, `_xonly_pub` | ct-covered | ✅ | ✅ | accessors; run inside the verified keypair paths |
+| `keypair_xonly_tweak_add` | **ct-verified** | ✅ | ✅ | secret negated to match even-y; consistency tested; valgrind clean |
 
 ## schnorr
 
@@ -331,8 +356,8 @@ Phase 6. BIP340. Signing is on the secret path.
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
 | `sign` | **ct-verified** | ✅ | ✅ | official BIP340 vectors pass byte-for-byte; valgrind clean |
-| `verify` | unverified | ✅ | ✅ | variable-time by design; public data only |
-| `nonce_function_bip340` | unverified | ✅ | ✅ | aux-rand masking; deterministic without it |
+| `verify` | public | ✅ | ✅ | variable-time by design; public data only |
+| `nonce_function_bip340` | ct-covered | ✅ | ✅ | aux-rand masking; deterministic without it |
 
 Both conditional negations — the secret key against the x-only public key, and the nonce
 against R's parity — are covered: removing either fails the suite.
@@ -344,7 +369,7 @@ Phase 6. The scalar is a private key throughout.
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
 | `ecdh` | **ct-verified** | ✅ | ✅ | uses `ecmult_const`; valgrind clean, and the injection test targets this path |
-| `hash_function_sha256` | unverified | ✅ | ✅ | hashes the compressed point, so both parties agree |
+| `hash_function_sha256` | ct-covered | ✅ | ✅ | hashes the compressed point, so both parties agree |
 
 **Note:** replacing `ecmult_const` here with the variable-time engine passes every test.
 Functional testing cannot distinguish them; only the Phase 8 harness can.
@@ -355,10 +380,10 @@ Phase 6. Entirely public data.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `sign_recoverable` | unverified | ✅ | ✅ | |
-| `recover`, `sig_recover` | unverified | ✅ | ✅ | recovered key checked against an independently derived one |
-| `signature_serialize_compact`, `_parse_compact` | unverified | ✅ | ✅ | rejects out-of-range recovery ids |
-| `signature_convert` | unverified | ✅ | ✅ | |
+| `sign_recoverable` | **ct-verified** | ✅ | ✅ | |
+| `recover`, `sig_recover` | public | ✅ | ✅ | recovered key checked against an independently derived one |
+| `signature_serialize_compact`, `_parse_compact` | public | ✅ | ✅ | rejects out-of-range recovery ids |
+| `signature_convert` | public | ✅ | ✅ | |
 
 ## ellswift
 
@@ -367,11 +392,11 @@ is not yet implemented.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `decode`, `swiftec_var`, `xswiftec_var` | unverified | ✅ | ✅ | total: every 64-byte string decodes |
-| `xswiftec_frac_var` | unverified | ✅ | ✅ | agrees with the direct form |
-| `xswiftec_inv_var` | unverified | ✅ | ✅ | each solved branch decodes back |
-| `encode`, `elligatorswift_var` | unverified | ✅ | ✅ | round-trips; unlinkable across randomness |
-| `xdh`, `create` | unverified | ✅ | ✅ | symmetric; transcript-bound |
+| `decode`, `swiftec_var`, `xswiftec_var` | public | ✅ | ✅ | total: every 64-byte string decodes |
+| `xswiftec_frac_var` | public | ✅ | ✅ | agrees with the direct form |
+| `xswiftec_inv_var` | public | ✅ | ✅ | each solved branch decodes back |
+| `encode`, `elligatorswift_var` | public | ✅ | ✅ | round-trips; unlinkable across randomness |
+| `xdh`, `create` | **ct-verified** | ✅ | ✅ | symmetric; transcript-bound |
 
 `xdh` uses lift-and-`ecmult_const` rather than upstream's inversion-free `ecmult_const_xonly`
 ladder. Same result and same constant-time property for the secret scalar; one extra
@@ -380,29 +405,29 @@ inversion and square root per exchange. Recorded rather than silent.
 ## musig
 
 Phase 7. BIP327. `CLAUDE.md` names this the highest-risk code in the project, and it is the
-last symbol scheduled to reach `ct-verified`.
+last to reach `ct-verified`, which it now has on both `nonce_gen` and `partial_sign`.
 
 | symbol | status | vectors | invariants | notes |
 |---|---|---|---|---|
-| `pubkey_agg` | unverified | ✅ | ✅ | coefficient-weighted; rogue-key resistance tested |
-| `keyaggcoef{,_internal}` | unverified | ✅ | ✅ | second-key coefficient fixed at 1 per spec |
-| `compute_pks_hash` | unverified | ✅ | ✅ | order-dependent by design |
-| `pubkey_sort` | unverified | ✅ | ✅ | makes aggregation canonical |
-| `pubkey_xonly_tweak_add`, `pubkey_ec_tweak_add` | unverified | ✅ | ✅ | maintains `tweak` and `parity_acc` |
+| `pubkey_agg` | public | ✅ | ✅ | coefficient-weighted; rogue-key resistance tested |
+| `keyaggcoef{,_internal}` | public | ✅ | ✅ | second-key coefficient fixed at 1 per spec |
+| `compute_pks_hash` | public | ✅ | ✅ | order-dependent by design |
+| `pubkey_sort` | public | ✅ | ✅ | makes aggregation canonical |
+| `pubkey_xonly_tweak_add`, `pubkey_ec_tweak_add` | **ct-verified** | ✅ | ✅ | maintains `tweak` and `parity_acc` |
 | `nonce_gen` | **ct-verified** | ✅ | ✅ | **session id must never repeat**; BIP327 vectors match exactly; valgrind clean |
-| `nonce_agg`, `nonce_process` | unverified | ✅ | ✅ | binding coefficient b |
+| `nonce_agg`, `nonce_process` | public | ✅ | ✅ | binding coefficient b |
 | **`partial_sign`** | **ct-verified** | ✅ | ✅ | wipes the secnonce first; reuse tested impossible |
-| `partial_sig_verify` | unverified | ✅ | ✅ | attributes failure to a specific signer |
-| `partial_sig_agg` | unverified | ✅ | ✅ | includes the tweak contribution |
-| `secnonce_clear` | unverified | ✅ | ✅ | for abandoned sessions |
+| `partial_sig_verify` | public | ✅ | ✅ | attributes failure to a specific signer |
+| `partial_sig_agg` | public | ✅ | ✅ | includes the tweak contribution |
+| `secnonce_clear` | ct-covered | ✅ | ✅ | for abandoned sessions |
 
 Four security mutations were injected and all four failed the suite: removing the nonce
 wipe, forcing every aggregation coefficient to 1 (the rogue-key attack), dropping the
 binding coefficient (the Wagner attack), and skipping the parity negation.
 
-**Not yet run against the BIP327 test vectors.** The end-to-end property is verified against
-the real BIP340 verifier, and the security properties are tested directly, but the official
-vector corpus is Phase 9 work. Until it runs, do not claim BIP327 conformance.
+**Every BIP327 vector group now passes** — key aggregation, nonce generation, nonce
+aggregation, tweaks, sign/verify and signature aggregation, error cases included. That run
+found `nonce_gen` was not implementing BIP327 NonceGen at all; see `TODO.md` §1.
 
 ## params
 
@@ -410,7 +435,7 @@ Configuration only; no runtime behaviour, no secrets.
 
 | symbol | status | notes |
 |---|---|---|
-| curve constants | unverified | generator verified on-curve and of the expected order, for all four configurations |
+| curve constants | n/a | generator verified on-curve and of the expected order, for all four configurations |
 
 ## Not yet started
 

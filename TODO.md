@@ -444,6 +444,89 @@ materially different and has never been measured.
 
 ---
 
+## 11. Drop-in C ABI — done
+
+`capi/` originally exported 20 functions under `secp256k1_odin_*` names. It now exports the
+**complete** upstream public API — all 75 functions plus every exported constant — under
+upstream's own symbol names, with upstream's struct sizes and flag values.
+
+- [x] Added the 55 missing entry points: the preallocated-context API, the illegal/error
+      callbacks, pubkey combine/sort/cmp/negate, both seckey and pubkey tweaks, all of
+      recovery, all of extrakeys, `schnorrsig_sign_custom`, all of ellswift, and all 17
+      MuSig2 functions. Plus the exported function-pointer constants
+      (`nonce_function_rfc6979`, `ecdh_hash_function_sha256`, and so on), which are data
+      symbols, not functions.
+- [x] Custom callbacks are genuinely wired, not stubbed. ECDSA's `noncefp`, ECDH's and
+      ellswift's `hashfp`, and the illegal/error callbacks all reach C. The trampolines pack
+      the C function pointer and user data into a struct passed as the internal `data`
+      pointer, so they stay reentrant — a `proc "contextless"` cannot capture. The one
+      exception is Schnorr's hardened nonce function, whose internal callback type has no
+      user-data parameter; that one travels in a global and is documented as non-reentrant.
+      Calls that use the *default* nonce function — which is every ordinary caller — never
+      touch it and stay on the constant-time-verified path.
+- [x] `schnorr.sign` gained an optional `noncefp`/`ndata`, mirroring upstream's
+      `schnorrsig_sign_custom`. Existing call sites are unaffected; the parameters default
+      to nil and the default path is byte-identical to before.
+- [x] **Initialization under C linkage, properly.** `@(init)` never runs when linked into a
+      C program, and `secp256k1_context_static` lets a caller reach the library without ever
+      calling `context_create`. Every entry point now calls `ensure_ready`, a double-checked
+      atomic guard — one relaxed load in the common case. The unsynchronized `*_ready` flags
+      in `ecmult` are safe only because nothing can observe a half-built table, and this is
+      what preserves that invariant when there is no Odin runtime start-up to rely on.
+- [x] The six MuSig2 opaque blobs are packed to upstream's exact sizes (197/132/132/132/
+      133/36), each with a distinct magic prefix so an uninitialized or wrong-typed blob is
+      rejected rather than silently reinterpreted.
+- [x] Headers rewritten as a full set matching upstream's — `secp256k1.h` plus the six
+      module headers, replacing the single `secp256k1_odin.h`. CI checks that a consumer
+      compiled against ours and against upstream's produces identical output.
+
+### It found a real bug the oracle could not
+
+`dropin/run.sh` compiles one unmodified C consumer twice, against each archive, and diffs.
+On the first run, exactly one of 61 lines differed: `ellswift_encode`.
+
+BIP324 specifies the candidate stream as `H(pubkey || "\x00"*31 || rnd32 || cnt)`. This
+implementation was hashing the bare 33-byte serialization with no padding. The encoding it
+produced was *valid* — `decode` returns the original key, so the round-trip test passed —
+but no other implementation derives it from the same randomness, which is the entire
+property `rnd32` exists to provide. This is the same class of defect, in the same module,
+that item 2 recorded for `ellswift_create`.
+
+The differential oracle had a binding for `ellswift_encode` and never called it. Fixed, and
+`test_oracle_ellswift_encode` now closes the gap — verified to fail against the old code, so
+it is not vacuous.
+
+## 12. `csuite` stack overflow — fixed
+
+`csuite_layout` writes nine `u64`s; `test_csuite.c` declared and passed an array of eight.
+The Odin side wrote eight bytes past the end of a C stack array on every run, and the only
+symptom was the stack protector aborting on return — after the output had been printed and
+lost to buffering, which is why it looked like a hang rather than a smash.
+
+- [x] C side widened to nine, with the count in a `#define` so the two cannot drift again.
+- [x] `csuite/build.sh` now compiles with `-Wall -Wextra -fstack-protector-strong`, so this
+      class of mismatch fails loudly everywhere rather than only where the platform happens
+      to enable the protector by default.
+
+## 13. Continuous integration — done
+
+`.github/workflows/ci.yml`, with two composite actions that pin the Odin release and build
+upstream with every module enabled (`RECOVERY` is off by default, which has broken the
+oracle link before).
+
+Eight jobs: the suite on x86-64, ARM64 and macOS in release and `-debug`; exhaustive orders
+7 and 13 (199 nightly — it takes ~32 minutes); the differential oracle on two platforms; the
+vector corpora, including a check that the committed Wycheproof and BIP327 tables regenerate
+byte-for-byte from a fresh upstream checkout; the valgrind constant-time gate at both
+`-o:none` and `-o:speed`; dudect; the C ABI, drop-in swap and csuite; and a consumer-hygiene
+job asserting no library package reaches the oracle or a test framework.
+
+- [x] The vector generators took environment-driven paths, replacing hardcoded
+      `/home/jdavis/...` ones, so the reproduction check can run anywhere.
+- [x] `ct_tests/build.sh` takes an optimization level, so the gate can run at both.
+
+---
+
 ## Suggested order
 
 1, 2 → 3, 4 → 7 → 6 → 5. Item 9 is done; item 8 is most of the way there and its remaining

@@ -9,6 +9,12 @@
 #   ./ct_tests/build.sh --valgrind   # valgrind client requests  (needs valgrind-devel)
 #   ./ct_tests/build.sh --msan       # MemorySanitizer           (Linux/FreeBSD only)
 #
+# An optional second argument sets the optimization level, default -o:none. Run the gate at
+# -o:speed too: two of the defects it has found existed only there, where the optimizer
+# rewrote a constant-time select into a branch and DCE reshaped a secret-dependent test.
+#
+#   ./ct_tests/build.sh --valgrind -o:speed
+#
 # Then, on a platform with valgrind:
 #
 #   valgrind --error-exitcode=1 ./ct_tests.bin
@@ -29,6 +35,13 @@ case "$1" in
     *)          echo "$0: unknown option $1" >&2; exit 1 ;;
 esac
 
+opt="-o:none"
+case "${2:-}" in
+    -o:*) opt="$2" ;;
+    "")   ;;
+    *)    echo "$0: unknown optimization level $2" >&2; exit 1 ;;
+esac
+
 cc -c $cflags -O1 -o "$dir/checkmem.o" "$dir/checkmem.c"
 
 # The internal `*_verify` layer must be OFF here. Those checks branch on field magnitudes
@@ -41,7 +54,7 @@ cc -c $cflags -O1 -o "$dir/checkmem.o" "$dir/checkmem.c"
 # SECP256K1_DECLASSIFY turns on the library's declassification hook, which this harness
 # installs. Without it the library cannot tell the checker that a value has legitimately
 # become public, and every such point is reported as a leak.
-odin build "$dir" -debug -o:none -define:SECP256K1_VERIFY=false \
+odin build "$dir" -debug "$opt" -define:SECP256K1_VERIFY=false \
     -define:SECP256K1_DECLASSIFY=true $odinflags -out:"$root/ct_tests.bin"
 
-echo "built $root/ct_tests.bin"
+echo "built $root/ct_tests.bin ($opt)"

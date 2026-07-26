@@ -29,7 +29,11 @@ typedef struct { secp256k1_fe x; secp256k1_fe y; int infinity; } secp256k1_ge;
 typedef struct { secp256k1_fe x; secp256k1_fe y; secp256k1_fe z; int infinity; } secp256k1_gej;
 typedef struct { secp256k1_fe_storage x; secp256k1_fe_storage y; } secp256k1_ge_storage;
 
-void secp256k1_csuite_layout(uint64_t out[8]);
+/* Nine entries, not eight: the ninth is sizeof(Ecmult_Gen_Context). Getting this count
+ * wrong is a stack overflow rather than a failed check — the Odin side writes past the
+ * end of the array, and the only symptom is the stack protector firing on return. */
+#define CSUITE_LAYOUT_N 9
+void secp256k1_csuite_layout(uint64_t out[CSUITE_LAYOUT_N]);
 void secp256k1_csuite_init(void);
 
 void secp256k1_fe_set_int(secp256k1_fe *r, uint32_t a);
@@ -90,7 +94,7 @@ static const unsigned char GY[32] = {
 };
 
 static void test_layout(void) {
-    uint64_t l[8];
+    uint64_t l[CSUITE_LAYOUT_N];
     secp256k1_csuite_layout(l);
 
     check(l[0] == sizeof(secp256k1_fe),          "sizeof(fe)");
@@ -102,9 +106,14 @@ static void test_layout(void) {
     check(l[6] == sizeof(secp256k1_fe_storage),  "sizeof(fe_storage)");
     check(l[7] == sizeof(secp256k1_ge_storage),  "sizeof(ge_storage)");
 
-    printf("  layout: fe=%llu ge=%llu inf@%llu gej=%llu inf@%llu scalar=%llu\n",
+    /* The generator context has no C counterpart to compare against, so its size is only
+     * reported; what matters is that the Odin side has somewhere to write it. */
+    check(l[8] > 0, "sizeof(ecmult_gen_context)");
+
+    printf("  layout: fe=%llu ge=%llu inf@%llu gej=%llu inf@%llu scalar=%llu gen_ctx=%llu\n",
            (unsigned long long)l[0], (unsigned long long)l[1], (unsigned long long)l[2],
-           (unsigned long long)l[3], (unsigned long long)l[4], (unsigned long long)l[5]);
+           (unsigned long long)l[3], (unsigned long long)l[4], (unsigned long long)l[5],
+           (unsigned long long)l[8]);
 }
 
 static void test_field(void) {

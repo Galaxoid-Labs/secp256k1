@@ -437,7 +437,34 @@ Configuration only; no runtime behaviour, no secrets.
 |---|---|---|
 | curve constants | n/a | generator verified on-curve and of the expected order, for all four configurations |
 
+## capi — the drop-in C ABI
+
+84 exported symbols, covering upstream's complete public API under upstream's own names.
+Rows are not listed individually: every one is a thin argument-validating wrapper that loads
+the opaque blob, calls the corresponding Odin symbol above, and stores the result. The
+constant-time status of each is the status of what it calls.
+
+| concern | status | notes |
+|---|---|---|
+| the wrappers themselves | `public` | argument validation branches on pointer nullity and caller-supplied lengths, all public |
+| secret-path entry points | inherits | `ecdsa_sign`, `schnorrsig_sign32`, `ecdh`, `musig_partial_sign` and friends route to the same procedures the harness drives |
+| custom `noncefp` / `hashfp` | **caller's** | a caller-supplied callback is outside this library's analysis; the default path never invokes one |
+| blob packing | `public` | `ge_to_storage` and `scalar_get_b32` on values that are about to cross into C, so already public |
+
+**Byte-identical to libsecp256k1 at the C boundary.** `dropin/run.sh` compiles one unmodified
+C consumer against each archive and diffs 61 lines of output covering every module. That is
+evidence about the boundary — struct sizes, field offsets, flag values, callback signatures,
+initialization order — which the differential oracle does not test, because the oracle calls
+both libraries through Odin bindings rather than through C.
+
+**One caveat, recorded rather than buried.** `schnorrsig_sign_custom` with a *caller-supplied*
+nonce function is not reentrant: the internal callback type has no user-data parameter, so
+the C function pointer travels in a package global. Every other custom callback (ECDSA nonce,
+ECDH hash, ellswift hash, illegal/error) uses a per-call trampoline struct and is reentrant.
+The default nonce function — what every ordinary caller uses — touches neither.
+
 ## Not yet started
 
 Every module in the plan now has an implementation. What remains is verification:
-the Phase 8 constant-time harness and the Phase 9 vector corpora and differential oracle.
+per-symbol constant-time attribution for the `ct-covered` rows, and the two `ct-untested`
+symbols named above.

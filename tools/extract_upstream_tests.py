@@ -12,10 +12,16 @@ that no assertion was quietly softened on the way across.
 import re
 import sys
 
-SRC = "/home/jdavis/Development/secp256k1-upstream/src/tests.c"
+import os
+
+# Paths are environment-driven so CI can point these at a fresh upstream checkout and prove
+# the committed tables reproduce byte-for-byte. Defaults preserve the original local layout.
+UPSTREAM = os.environ.get("UPSTREAM", "/home/jdavis/Development/secp256k1-upstream")
+REPO = os.environ.get("REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SRC = f"{UPSTREAM}/src/tests.c"
 # Shared helpers (random element generation, comparison) live in a separate header upstream.
-SRC_UTIL = "/home/jdavis/Development/secp256k1-upstream/src/testutil.h"
-OUT = "/home/jdavis/Development/secp256k1/csuite/shim/upstream_bodies.h"
+SRC_UTIL = f"{UPSTREAM}/src/testutil.h"
+OUT = f"{REPO}/csuite/shim/upstream_bodies.h"
 
 # Functions to lift. Each must be reachable using only the API the shim declares; a name
 # that needs something unexported fails loudly at compile time rather than being skipped.

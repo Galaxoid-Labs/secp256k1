@@ -136,6 +136,28 @@ ZERO_MASK := [32]u8 {
 }
 
 /*
+The algorithm label BIP340 mixes into every nonce, and the one a custom nonce function is
+handed so it can tell which scheme it is being asked to serve.
+*/
+ALGO_BIP340 :: "BIP0340/nonce"
+
+/*
+A caller-supplied nonce function, matching upstream's `secp256k1_nonce_function_hardened`.
+
+Returns false to abort signing. `algo` identifies the calling scheme — a nonce function
+shared between schemes must incorporate it, or the same key signing the same message under
+two schemes derives the same nonce and leaks the key.
+*/
+Nonce_Function_Hardened :: #type proc "contextless" (
+	nonce32: ^[32]u8,
+	msg: []u8,
+	key32: ^[32]u8,
+	xonly_pk32: ^[32]u8,
+	algo: []u8,
+	data: rawptr,
+) -> bool
+
+/*
 Derives a BIP340 nonce.
 
 `aux_rand32` is optional auxiliary randomness. It does not have to be secret or
@@ -216,6 +238,8 @@ sign :: proc "contextless" (
 	msg: []u8,
 	keypair: ^extrakeys.Keypair,
 	aux_rand32: ^[32]u8 = nil,
+	noncefp: Nonce_Function_Hardened = nil,
+	ndata: rawptr = nil,
 ) -> bool {
 	sk := keypair.seckey
 	pk := keypair.pubkey
@@ -235,11 +259,25 @@ sign :: proc "contextless" (
 	field.fe_get_b32(&pk_buf, &pk.x)
 
 	nonce32: [32]u8
-	nonce_function_bip340(&nonce32, msg, &seckey, &pk_buf, aux_rand32)
+	// A caller-supplied nonce function is the caller's responsibility, including its
+	// side-channel behaviour; the default path is the one the constant-time harness clears.
+	nonce_ok := true
+	if noncefp == nil {
+		nonce_function_bip340(&nonce32, msg, &seckey, &pk_buf, aux_rand32)
+	} else {
+		nonce_ok = noncefp(
+			&nonce32,
+			msg,
+			&seckey,
+			&pk_buf,
+			transmute([]u8)string(ALGO_BIP340),
+			ndata,
+		)
+	}
 
 	k: scalar.Scalar
 	scalar.scalar_set_b32(&k, &nonce32)
-	ok := !scalar.scalar_is_zero(&k)
+	ok := nonce_ok && !scalar.scalar_is_zero(&k)
 	// Keep going with a dummy value so the failure path costs the same as the success
 	// path; the result is zeroed at the end.
 	scalar.scalar_cmov(&k, &scalar.ONE, !ok)

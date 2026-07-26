@@ -405,12 +405,17 @@ encode :: proc "contextless" (ell64: ^[64]u8, pubkey: ^group.Ge, rnd32: ^[32]u8)
 	field.fe_normalize_var(&p.x)
 	field.fe_normalize_var(&p.y)
 
-	pk33: [33]u8
-	pk33[0] = 0x03 if field.fe_is_odd(&p.y) else 0x02
-	xb := (^[32]u8)(&pk33[1])
+	// The key goes in zero-padded to 64 bytes, not as the bare 33-byte serialization: the
+	// stream is specified as H(pubkey || "\x00"*31 || rnd32 || cnt). Hashing only 33 bytes
+	// still produces a valid encoding — it decodes back to the same key, which is why a
+	// round-trip test cannot see the difference — but it is a different one than every other
+	// implementation derives from the same randomness.
+	pk64: [64]u8
+	pk64[0] = 0x03 if field.fe_is_odd(&p.y) else 0x02
+	xb := (^[32]u8)(&pk64[1])
 	field.fe_get_b32(xb, &p.x)
 
-	hash.sha256_write(&hasher, pk33[:])
+	hash.sha256_write(&hasher, pk64[:])
 	hash.sha256_write(&hasher, rnd32[:])
 
 	u_out := (^[32]u8)(&ell64[0])

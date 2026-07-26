@@ -40,6 +40,26 @@ import "scalar"
 import "schnorr"
 
 /*
+The library version, as the single source of truth. The C header's `SECP256K1_VER_*` macros
+and the README are derived from these; nothing else should carry a version number.
+
+Semantics follow semver. While the major version is 0 the API may change between minor
+versions — the trust model in `TRUST.md`, not the version number, is what says which symbols
+are cleared for what.
+*/
+VERSION_MAJOR :: 0
+VERSION_MINOR :: 1
+VERSION_PATCH :: 0
+
+/*
+The version as a string, e.g. "0.1.0".
+
+Odin has no compile-time integer-to-string, so this cannot be derived from the components
+above; a test asserts the two agree rather than trusting them to be edited together.
+*/
+VERSION :: "0.1.0"
+
+/*
 Errors returned by this API.
 */
 Error :: enum {

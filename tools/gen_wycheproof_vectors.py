@@ -7,7 +7,13 @@ a diff against upstream.
 """
 import json, sys, textwrap
 
-SRC = "/home/jdavis/Development/secp256k1-upstream/src/wycheproof"
+import os
+
+# Paths are environment-driven so CI can point these at a fresh upstream checkout and prove
+# the committed tables reproduce byte-for-byte. Defaults preserve the original local layout.
+UPSTREAM = os.environ.get("UPSTREAM", "/home/jdavis/Development/secp256k1-upstream")
+REPO = os.environ.get("REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SRC = f"{UPSTREAM}/src/wycheproof"
 
 
 def esc(s):
@@ -109,7 +115,7 @@ WYCHEPROOF_ECDH := [{len(rows)}]Wycheproof_Ecdh_Case{{
 
 
 if __name__ == "__main__":
-    n, v = gen_ecdsa("/home/jdavis/Development/secp256k1/tests/ecdsa/wycheproof_ecdsa_vectors.odin")
+    n, v = gen_ecdsa(f"{REPO}/tests/ecdsa/wycheproof_ecdsa_vectors.odin")
     print(f"ecdsa: {n} cases, {v} valid")
-    n, c = gen_ecdh("/home/jdavis/Development/secp256k1/tests/ecdh_recovery/wycheproof_ecdh_vectors.odin")
+    n, c = gen_ecdh(f"{REPO}/tests/ecdh_recovery/wycheproof_ecdh_vectors.odin")
     print(f"ecdh: {n} cases, {c}")

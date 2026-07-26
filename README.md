@@ -7,21 +7,22 @@ functional parity with [`bitcoin-core/secp256k1`](https://github.com/bitcoin-cor
 > and has not been independently audited. [`TRUST.md`](TRUST.md) records the verification
 > status of every public symbol — what has been checked, how, and what has not.
 
-**Status:** all modules implemented — field, scalar, group, ecmult, hash, context, ECDSA,
-recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2 (BIP327).
+**Version 0.1.0.** All modules implemented — field, scalar, group, ecmult, hash, context,
+ECDSA, recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2 (BIP327).
 
 | check | result |
 |---|---|
-| Test suite (release and `-debug`) | 105 pass |
+| Test suite (release and `-debug`) | 107 pass |
 | Differential oracle vs libsecp256k1 | zero divergences, ARM64 and x86-64 |
 | Wycheproof ECDSA / ECDH | 463 / 752 pass |
 | BIP340 Schnorr, BIP327 MuSig2 | all vector groups pass |
 | Exhaustive small-curve (orders 7, 13, 199) | entire group enumerated |
 | Constant-time harness (valgrind) | 0 findings across 10 secret paths |
 | Upstream `tests.c` bodies | 18 suites pass — see [`TODO.md`](TODO.md) item 5 |
+| Drop-in swap vs libsecp256k1 | one C consumer, either archive, byte-identical output |
 | Performance vs C | 0.98–1.05×, see [Performance](#performance) |
 
-Getting there found eighteen real defects the existing suite could not see — a constant-time
+Getting there found twenty real defects the existing suite could not see — a constant-time
 table scan LLVM had rewritten into a branch, a MuSig2 nonce derivation that did not implement
 BIP327, a BIP324 handshake that decoded the wrong peer key. Each is recorded with its cause
 in [`TODO.md`](TODO.md) and [`TRUST.md`](TRUST.md).
@@ -64,14 +65,44 @@ can run against this implementation; `./csuite/build.sh` builds and runs them.
 
 ## Use from other languages
 
-The library also builds as a C-ABI shared or static library:
+The library builds as a C-ABI shared or static library, exporting the **complete
+libsecp256k1 public API under upstream's own symbol names**:
 
 ```sh
-odin build capi/ -build-mode:shared -o:speed    # .dylib / .so / .dll
-odin build capi/ -build-mode:static -o:speed    # .a
+odin build capi/ -build-mode:static -no-entry-point -o:speed -out:libsecp256k1.a
+odin build capi/ -build-mode:shared -no-entry-point -o:speed -out:libsecp256k1.so
 ```
 
-Headers are in `capi/include/`, matching libsecp256k1's documented ABI.
+All 75 API functions and every exported constant are present, with upstream's struct sizes,
+flag values and return conventions. An existing C program compiled against libsecp256k1's own
+headers links against this archive unchanged — no shim, no aliasing, no recompilation:
+
+```sh
+cc consumer.c libsecp256k1.a -o consumer      # upstream's headers, this implementation
+```
+
+`dropin/run.sh` is the proof. It compiles one unmodified C consumer twice — once against the
+real libsecp256k1, once against ours, using upstream's headers both times — exercises every
+module, and diffs the output byte for byte:
+
+```sh
+./dropin/run.sh /path/to/upstream/secp256k1    # must be built with all modules
+```
+
+That test earned its keep immediately: it found `ellswift_encode` hashing the public key
+unpadded where BIP324 specifies `H(pubkey || "\x00"*31 || rnd32 || cnt)`. The encoding it
+produced was valid and round-tripped correctly, so nothing that only exercised our own code
+could see it — including the differential oracle, which had bindings for that function but
+never called it.
+
+Headers are in `capi/include/`, hand-written to declare the same API. A consumer that already
+has upstream's headers should keep using those; CI checks that both sets produce an identical
+program.
+
+> The symbol collision with the real libsecp256k1 is deliberate — that is what "drop-in"
+> means — so a binary must link one or the other, never both. Which makes it worth repeating
+> that this library is **not for real value**: being easy to substitute for the audited
+> implementation is precisely the risk.
 
 ## Performance
 
@@ -186,8 +217,15 @@ odin test tests/oracle/ -define:FUZZ_COUNT=2000            # differential vs C
 ./bench/run.sh -define:ITERS=20000                         # benchmarks vs C
 
 ./ct_tests/build.sh --valgrind && valgrind --error-exitcode=1 ./ct_tests.bin
+./ct_tests/build.sh --valgrind -o:speed && valgrind --error-exitcode=1 ./ct_tests.bin
 ./csuite/build.sh                                          # upstream test bodies, via C
+./dropin/run.sh /path/to/upstream/secp256k1                # drop-in swap against C
 ```
+
+CI runs all of the above on every push — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+The order-199 exhaustive run takes about half an hour with the invariant layer on, so it runs
+on the nightly schedule rather than in front of every pull request; orders 7 and 13 gate
+everything.
 
 The constant-time harness needs Linux (valgrind has no macOS ARM64 port) and the valgrind
 headers — `valgrind-devel` on Fedora, `valgrind` on Debian. It builds with

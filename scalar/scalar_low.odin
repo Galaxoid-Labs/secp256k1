@@ -60,7 +60,7 @@ when params.EXHAUSTIVE_ORDER > 0 {
 
 	scalar_verify :: #force_inline proc "contextless" (a: ^Scalar, loc := #caller_location) {
 		when VERIFY {
-			runtime.assert_contextless(a.d < ORDER, "scalar_verify: value is not reduced", loc)
+			CHECK(a.d < ORDER, "scalar_verify: value is not reduced", loc)
 		}
 	}
 

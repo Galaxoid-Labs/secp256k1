@@ -1,0 +1,319 @@
+name: CI
+
+# Every gate that can catch a regression runs here. The project's history is the argument
+# for that: valgrind found twelve constant-time defects that 105 functional tests and a
+# zero-divergence differential oracle all passed, and the C ABI job exists because linking
+# into C found tables that were silently zero. Each job below has caught something no other
+# job could see.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # 04:00 UTC daily, for the gates too slow to sit in front of a pull request.
+    - cron: '0 4 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned so a compiler release cannot silently change what "passing" means. Bump
+  # deliberately.
+  ODIN_VERSION: dev-2026-07a
+  # The oracle, the vector corpora and the benchmarks all come from one upstream checkout.
+  UPSTREAM_TAG: v0.7.1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The functional suite, on both architectures. Different codegen is genuine extra
+  # coverage, not a repeat: the x86-64 and ARM64 backends allocate registers differently
+  # and inline differently.
+  # ---------------------------------------------------------------------------
+  tests:
+    name: tests (${{ matrix.os }}, ${{ matrix.mode }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+        mode: [release, debug]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Odin
+        uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+
+      # `-debug` compiles in the magnitude and normalization invariant layer. It is much
+      # slower and catches representation bugs the release build cannot see, so both run.
+      - name: Run the suite
+        run: |
+          if [ "${{ matrix.mode }}" = "debug" ]; then
+            odin test tests/ -all-packages -debug
+          else
+            odin test tests/ -all-packages
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Exhaustive curves. Enumerates the entire group rather than sampling, which is the only
+  # thing that reaches the degenerate cases of the addition formulas by construction.
+  # ---------------------------------------------------------------------------
+  exhaustive:
+    name: exhaustive (order ${{ matrix.order }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Order 199 enumerates a group 15x larger than order 13 and takes roughly half an
+        # hour with the invariant layer on, so it runs nightly instead of in front of every
+        # pull request. 7 and 13 reach the degenerate cases of the addition formulas just as
+        # surely and finish in seconds.
+        order: [7, 13]
+        include:
+          - order: 199
+            nightly: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+      - name: Enumerate the group
+        if: ${{ !matrix.nightly || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        run: odin test tests/exhaustive/ -debug -define:EXHAUSTIVE_ORDER=${{ matrix.order }}
+
+      - name: Skipped
+        if: ${{ matrix.nightly && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+        run: echo "::notice::order 199 runs on the nightly schedule and via workflow_dispatch"
+
+  # ---------------------------------------------------------------------------
+  # Differential oracle: byte-identical output against upstream on fuzzed inputs. The
+  # strongest correctness signal available, because the inputs are not chosen by us.
+  # ---------------------------------------------------------------------------
+  oracle:
+    name: differential oracle (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+      - uses: ./.github/actions/build-upstream
+        with:
+          tag: ${{ env.UPSTREAM_TAG }}
+
+      - name: Compare against libsecp256k1
+        run: |
+          ./oracle/link-lib.sh upstream/build/lib/libsecp256k1.a
+          odin test tests/oracle/ -define:FUZZ_COUNT=4000
+
+  # ---------------------------------------------------------------------------
+  # Published vector corpora, as hard gates. Chosen adversarial inputs, which random
+  # fuzzing does not reach: the strict DER parser accepting long-form lengths was found
+  # here, not by the oracle.
+  # ---------------------------------------------------------------------------
+  corpora:
+    name: vector corpora
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+      - uses: ./.github/actions/build-upstream
+        with:
+          tag: ${{ env.UPSTREAM_TAG }}
+
+      # Wycheproof ECDSA (463) and ECDH (752), BIP340, and every BIP327 MuSig2 group.
+      - name: Wycheproof, BIP340 and BIP327
+        run: |
+          odin test tests/ecdsa/ -debug
+          odin test tests/ecdh_recovery/ -debug
+          odin test tests/schnorr/ -debug
+          odin test tests/musig/ -debug
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The committed vector tables are transcriptions of upstream's own files. Regenerating
+      # them from a fresh checkout must reproduce them byte for byte - that is what makes
+      # "the vectors are unmodified" a checked fact rather than a claim. A diff here means
+      # either upstream changed or a table was hand-edited, and both need a human.
+      - name: Vector tables reproduce byte-for-byte from upstream
+        env:
+          UPSTREAM: ${{ github.workspace }}/upstream
+          REPO: ${{ github.workspace }}
+        run: |
+          python3 tools/gen_wycheproof_vectors.py
+          python3 tools/gen_bip327_vectors.py
+          python3 tools/extract_upstream_tests.py
+          git diff --exit-code -- tests/ csuite/ \
+            || { echo "::error::regenerated tables differ from what is committed"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # The constant-time gate. This is the job that has found the most, and the only one that
+  # can move a symbol to ct-verified in TRUST.md.
+  #
+  # Linux only: valgrind has no macOS ARM64 port and clang rejects -fsanitize=memory for
+  # arm64-apple-darwin. Both were attempted, not assumed.
+  # ---------------------------------------------------------------------------
+  constant-time:
+    name: constant-time gate (-o:${{ matrix.opt }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both levels, because two defects appeared only at -o:speed: the optimizer
+        # rewrote a cmov table scan into a branch plus a secret-indexed load, and only DCE
+        # removed CHECK arguments that were evaluating variable-time tests on secrets.
+        opt: [none, speed]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y valgrind
+          valgrind --version
+
+      - name: Build the harness with client requests
+        run: ./ct_tests/build.sh --valgrind -o:${{ matrix.opt }}
+
+      # The harness exits 2 when no checker is compiled in, so a build that quietly lost
+      # valgrind support fails here rather than reporting a green run that verified nothing.
+      - name: Gate
+        run: valgrind --error-exitcode=1 --track-origins=yes ./ct_tests.bin
+
+  # ---------------------------------------------------------------------------
+  # Statistical timing test. Complements the gate above rather than duplicating it: it
+  # measures wall-clock behaviour on real hardware, where valgrind models an abstract
+  # machine. Runs everywhere, including where valgrind cannot.
+  # ---------------------------------------------------------------------------
+  dudect:
+    name: statistical timing (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+      # Shared CI runners are noisy, so the sample count is raised rather than the
+      # threshold lowered. A |t| above 10 on any path is a hard failure.
+      - name: Welch t-test on five secret paths
+        run: odin run ct_tests/ -o:speed -define:DUDECT=true -define:DUDECT_SAMPLES=40000
+
+  # ---------------------------------------------------------------------------
+  # The C boundary. Both of these found bugs nothing else could: @(init) never runs when
+  # the code is linked into a C program (every precomputed table silently zero), and
+  # Ge.infinity was a 1-byte bool against upstream's 4-byte int.
+  # ---------------------------------------------------------------------------
+  c-abi:
+    name: C ABI, drop-in swap and upstream test bodies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+      - uses: ./.github/actions/build-upstream
+        with:
+          tag: ${{ env.UPSTREAM_TAG }}
+
+      - name: Build capi as shared and static
+        run: |
+          odin build capi/ -build-mode:shared -no-entry-point -o:speed -out:libsecp256k1.so
+          odin build capi/ -build-mode:static -no-entry-point -o:speed -out:libsecp256k1.a
+          ls -la libsecp256k1.*
+
+      # Every symbol upstream's headers declare must be present under exactly that name, or
+      # a consumer that happens not to call the missing one links fine and the next one does
+      # not. Checked mechanically rather than by reading the source.
+      - name: Exported symbols cover upstream's public API
+        run: |
+          nm -g --defined-only libsecp256k1.a | awk '$2=="T"||$2=="D"||$2=="B"{print $3}' \
+            | sed 's/^_//' | grep '^secp256k1_' | sort -u > ours.txt
+          nm -g --defined-only upstream/build/lib/libsecp256k1.a \
+            | awk '$2=="T"||$2=="D"||$2=="B"{print $3}' | sed 's/^_//' \
+            | grep '^secp256k1_' | sort -u > theirs_all.txt
+          grep -hoE 'secp256k1_[a-z0-9_]+\(' upstream/include/*.h | tr -d '(' | sort -u > declared.txt
+          grep -hoE 'SECP256K1_API const [a-z0-9_ ]*secp256k1_[a-z0-9_]+;' upstream/include/*.h \
+            | grep -oE 'secp256k1_[a-z0-9_]+;' | tr -d ';' | sort -u >> declared.txt
+          sort -u declared.txt -o declared.txt
+          comm -12 declared.txt theirs_all.txt > want.txt
+          echo "upstream declares and exports $(wc -l < want.txt) public symbols"
+          if ! comm -13 ours.txt want.txt | tee missing.txt | grep -q .; then
+            echo "all present"
+          else
+            echo "::error::missing exports:"; cat missing.txt; exit 1
+          fi
+
+      # The drop-in gate. One unmodified C consumer, upstream's own headers, both archives,
+      # byte-for-byte diff. This is what found the ellswift_encode divergence that the
+      # differential oracle could not see, because the oracle never called that function.
+      - name: Drop-in swap against the real libsecp256k1
+        run: ./dropin/run.sh upstream
+
+      # The consumer must also compile against the headers this repository ships, not only
+      # upstream's, or those headers are decoration.
+      - name: The shipped headers declare the same API
+        run: |
+          cc -O2 -Wall -Wextra -Werror -Icapi/include dropin/dropin_test.c libsecp256k1.a -o consumer_own
+          ./consumer_own > own.txt
+          cc -O2 -Iupstream/include dropin/dropin_test.c libsecp256k1.a -o consumer_up
+          ./consumer_up > up.txt
+          diff -u own.txt up.txt \
+            && echo "our headers and upstream's produce the same program"
+
+      # csuite links upstream's own test bodies against this implementation and checks the
+      # struct layouts from the C side rather than trusting a comment.
+      - name: Upstream test bodies via csuite
+        run: ./csuite/build.sh
+
+  # ---------------------------------------------------------------------------
+  # A consumer builds none of the above. This job asserts that: no C, no test framework, no
+  # oracle in the import graph of any library package.
+  # ---------------------------------------------------------------------------
+  consumer:
+    name: consumer build hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/install-odin
+        with:
+          version: ${{ env.ODIN_VERSION }}
+
+      - name: Library packages build with no C library present
+        run: |
+          # The oracle archive is deliberately absent. If any library package reaches the
+          # oracle, this fails to link - which is the property being tested.
+          test ! -e oracle/libsecp256k1.a
+          for p in params field modinv scalar group ecmult hash ctx eckey ecdsa \
+                   extrakeys schnorr ecdh recovery ellswift musig ct; do
+            odin check "$p/" -no-entry-point
+          done
+          odin check . -no-entry-point
+
+      - name: Examples build and run
+        run: |
+          for e in ecdsa schnorr ecdh; do odin run "examples/$e"; done
+
+      - name: Embedded table matches a fresh regeneration
+        run: |
+          odin test tests/ecmult/ -debug
+          odin test tests/ecmult/ -debug -define:SECP256K1_EMBED_TABLES=false

@@ -143,19 +143,34 @@ the C ABI was already required to link upstream's tests. There are two distinct 
 surfaces and they must not be conflated:
 
 - **`capi/` — the public ABI, shipped.** `@(export) proc "c"` wrappers whose signatures,
-  struct layouts, and semantics match libsecp256k1's `include/secp256k1*.h`, so existing C
-  consumers can link against it as a drop-in.
+  struct layouts, and semantics match libsecp256k1's `include/secp256k1*.h`.
 
   ```
-  odin build capi/ -build-mode:shared -o:speed    # .dylib / .so / .dll
-  odin build capi/ -build-mode:static -o:speed    # .a
+  odin build capi/ -build-mode:static -no-entry-point -o:speed -out:libsecp256k1.a
+  odin build capi/ -build-mode:shared -no-entry-point -o:speed -out:libsecp256k1.so
   ```
+
+  **Names are upstream's, not namespaced.** An earlier revision exported 20 functions as
+  `secp256k1_odin_*`, which was safe but was not a drop-in: a consumer had to be modified to
+  use it. The whole point of matching the ABI is that no modification is required, so the
+  export surface is now the complete public API — all 75 functions plus the exported
+  function-pointer constants — under upstream's own symbol names.
+
+  The consequence is a deliberate symbol collision: a binary links this or the real
+  libsecp256k1, never both. Inside this repository that is not a hazard, because the C
+  library is reached only through `oracle/`, which is never combined with this target.
 
   Headers are **hand-written to match the documented ABI**, not copied from upstream. Even
   under a matching license that keeps the header an honest statement of what *this*
   implementation guarantees rather than an inherited description of a different one.
   Upstream's headers are the specification being matched, and `#assert`s hold the struct
   sizes to it.
+
+  `dropin/run.sh` is the gate: it compiles one unmodified C consumer against upstream's
+  archive and against ours, using upstream's headers both times, and diffs the output. It
+  tests what no Odin-side test can — struct sizes, field offsets, flag values, callback
+  signatures, and the initialization that must happen before a C caller's first call, since
+  `@(init)` does not run under C linkage.
 
 - **`csuite/` — internal symbols, test-only, never shipped.** Upstream's `tests.c` reaches
   past the public API into `secp256k1_fe_mul`, `secp256k1_scalar_*`, `secp256k1_ge_*` and

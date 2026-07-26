@@ -15,10 +15,17 @@ root=$(dirname "$dir")
 odin build "$dir" -build-mode:static -o:speed -no-entry-point \
     -define:SECP256K1_VERIFY=false -out:"$root/libsecp256k1_csuite.a"
 
-cc "$dir/test_csuite.c" "$root/libsecp256k1_csuite.a" -o "$root/csuite_test"
+# The stack protector is not optional here: the C side declares the arrays the Odin side
+# writes into, and a count that drifts apart is a silent overflow rather than a failed
+# assertion. It has already caught one.
+cflags="-Wall -Wextra -fstack-protector-strong"
+cc $cflags "$dir/test_csuite.c" "$root/libsecp256k1_csuite.a" -o "$root/csuite_test"
 "$root/csuite_test"
 
 echo
-cc -I "$dir/shim" "$dir/shim/run_upstream_tests.c" "$root/libsecp256k1_csuite.a" \
+# The lifted bodies are upstream's, verbatim, and not every helper they bring along is
+# used by the subset we run. Editing them to silence that would defeat the point of
+# lifting them unmodified.
+cc $cflags -Wno-unused-function -I "$dir/shim" "$dir/shim/run_upstream_tests.c" "$root/libsecp256k1_csuite.a" \
     -o "$root/csuite_upstream_test"
 "$root/csuite_upstream_test"

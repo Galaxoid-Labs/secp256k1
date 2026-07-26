@@ -88,7 +88,19 @@ ECMULT_WINDOW_SIZE :: #config(ECMULT_WINDOW_SIZE, 15)
 	"ECMULT_WINDOW_SIZE must be in the range [2, 24]",
 )
 
-WINDOW_G :: ECMULT_WINDOW_SIZE
+// The generator tables need the same treatment as `WINDOW_A` above, and for the same reason:
+// a table of odd multiples 1G, 3G, 5G, ... must contain no infinity, but on a curve of order
+// n the entry nG is exactly that. The requested window would ask for 8192 odd multiples of a
+// point whose order is 7. These bounds are upstream's.
+when params.EXHAUSTIVE_ORDER == 0 {
+	WINDOW_G :: ECMULT_WINDOW_SIZE
+} else when params.EXHAUSTIVE_ORDER > 128 {
+	WINDOW_G :: 8
+} else when params.EXHAUSTIVE_ORDER > 8 {
+	WINDOW_G :: 4
+} else {
+	WINDOW_G :: 2
+}
 
 /*
 Number of entries in a table of odd multiples for the given window size.

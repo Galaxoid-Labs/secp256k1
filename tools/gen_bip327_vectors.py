@@ -6,8 +6,14 @@ upstream's generated header is a parse error here rather than a silently wrong t
 """
 import re, sys
 
-SRC = "/home/jdavis/Development/secp256k1-upstream/src/modules/musig/vectors.h"
-OUT = "/home/jdavis/Development/secp256k1/tests/musig/bip327_vectors.odin"
+import os
+
+# Paths are environment-driven so CI can point these at a fresh upstream checkout and prove
+# the committed tables reproduce byte-for-byte. Defaults preserve the original local layout.
+UPSTREAM = os.environ.get("UPSTREAM", "/home/jdavis/Development/secp256k1-upstream")
+REPO = os.environ.get("REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SRC = f"{UPSTREAM}/src/modules/musig/vectors.h"
+OUT = f"{REPO}/tests/musig/bip327_vectors.odin"
 
 text = open(SRC).read()
 # Strip comments so they cannot be mistaken for tokens.

@@ -1,0 +1,47 @@
+name: Install Odin
+description: >
+  Downloads a pinned Odin release and puts it on PATH. A plain download rather than a
+  third-party action: it is a tarball fetch, and this way the workflow depends on nothing
+  outside actions/* and the Odin project itself.
+
+inputs:
+  version:
+    description: Odin release tag, e.g. dev-2026-07a
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Download and install
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64)   asset="odin-linux-amd64-${{ inputs.version }}.tar.gz"  ;;
+          Linux-ARM64) asset="odin-linux-arm64-${{ inputs.version }}.tar.gz"  ;;
+          macOS-ARM64) asset="odin-macos-arm64-${{ inputs.version }}.tar.gz"  ;;
+          macOS-X64)   asset="odin-macos-amd64-${{ inputs.version }}.tar.gz"  ;;
+          *) echo "::error::no Odin asset known for $RUNNER_OS-$RUNNER_ARCH"; exit 1 ;;
+        esac
+
+        url="https://github.com/odin-lang/Odin/releases/download/${{ inputs.version }}/$asset"
+        echo "fetching $url"
+        curl -fsSL --retry 3 --retry-delay 5 -o /tmp/odin.tar.gz "$url"
+
+        mkdir -p "$HOME/.odin"
+        tar xf /tmp/odin.tar.gz -C "$HOME/.odin" --strip-components=1
+
+        # The release ships a prebuilt compiler; the tarball layout has varied across
+        # releases, so locate the binary rather than assuming a path.
+        odin_bin="$(find "$HOME/.odin" -maxdepth 2 -name odin -type f -perm -u+x | head -1)"
+        if [ -z "$odin_bin" ]; then
+          echo "::error::no odin binary found in the release tarball"
+          find "$HOME/.odin" -maxdepth 2 | head -40
+          exit 1
+        fi
+        echo "$(dirname "$odin_bin")" >> "$GITHUB_PATH"
+
+    - name: Report the version actually installed
+      shell: bash
+      run: odin version

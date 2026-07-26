@@ -456,6 +456,71 @@ test_oracle_ellswift :: proc(t: ^testing.T) {
 	}
 }
 
+/*
+ellswift encoding of an existing public key, against C.
+
+The third member of the family that had no comparison, and it had drifted the same way
+`create` had: the candidate stream is `H(pubkey || "\x00"*31 || rnd32 || cnt)`, and this
+implementation was hashing the bare 33-byte serialization with no padding. The encoding it
+produced was valid — `decode` returns the original key, so the round-trip test this file
+already had passed — but no other implementation derives it from the same randomness, which
+is the whole property `rnd32` exists to provide.
+
+Found by the drop-in swap test in `dropin/`, which links a C consumer against each library
+in turn; nothing that only exercised our own code could see it.
+
+Encoding is deterministic in (pubkey, rnd32), so the comparison is exact.
+*/
+@(test)
+test_oracle_ellswift_encode :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	rng: testutil.Rand
+	testutil.rand_seed(&rng, TEST_SEED + 0x5151)
+
+	for i in 0 ..< FUZZ_COUNT {
+		sk := random_seckey(t, &f, &rng)
+		rnd: [32]u8
+		testutil.rand_bytes_test(&rng, rnd[:])
+
+		our_pk: group.Ge
+		s: scalar.Scalar
+		if !scalar.scalar_set_b32_seckey(&s, &sk) {
+			continue
+		}
+		if !eckey.pubkey_create(&f.gen, &our_pk, &s) {
+			continue
+		}
+		ours: [64]u8
+		ellswift.encode(&ours, &our_pk, &rnd)
+
+		their_pk: oracle.Pubkey
+		testing.expectf(
+			t,
+			oracle.ec_pubkey_create(f.c_ctx, &their_pk, &sk[0]) == 1,
+			"C pubkey_create failed at %d",
+			i,
+		)
+		theirs: [64]u8
+		testing.expectf(
+			t,
+			oracle.ellswift_encode(f.c_ctx, &theirs[0], &their_pk, &rnd[0]) == 1,
+			"C ellswift_encode failed at %d",
+			i,
+		)
+
+		testing.expectf(
+			t,
+			ours == theirs,
+			"ellswift_encode mismatch at %d\n  ours   %x\n  theirs %x",
+			i,
+			ours,
+			theirs,
+		)
+	}
+}
+
 @(test)
 test_oracle_tagged_hash :: proc(t: ^testing.T) {
 	f: Fixture

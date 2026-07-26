@@ -37,6 +37,13 @@
 /libsecp256k1_csuite.a
 /csuite_upstream_test
 
+# The drop-in C ABI builds under upstream's own name; the swap test builds consumers.
+/libsecp256k1.a
+/libsecp256k1.so
+/libsecp256k1.dylib
+/consumer_own
+/consumer_up
+
 # The generated generator tables. Negated out of the blanket `*.bin` above: the
 # embedded-table build is the default and `#load` resolves at compile time, so a fresh clone
 # must have this or it will not build. Regenerate with `odin run precompute_ecmult/`;

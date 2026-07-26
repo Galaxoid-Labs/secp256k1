@@ -74,6 +74,41 @@ Keypair :: struct {
 }
 
 /*
+Upstream's opaque MuSig2 types.
+
+The sizes are taken from `include/secp256k1_musig.h` and must match exactly: these are
+passed by pointer into C, which writes the full struct. A size that is too small is a buffer
+overflow, and one that is too large silently works while hiding a layout mismatch, so
+`test_musig_struct_sizes` pins each against the header.
+
+Layouts are internal to the C library and are never inspected here — values cross the
+boundary only through the serialize entry points, which is the whole reason those exist.
+*/
+Musig_Keyagg_Cache :: struct {
+	data: [197]u8,
+}
+
+Musig_Secnonce :: struct {
+	data: [132]u8,
+}
+
+Musig_Pubnonce :: struct {
+	data: [132]u8,
+}
+
+Musig_Aggnonce :: struct {
+	data: [132]u8,
+}
+
+Musig_Session :: struct {
+	data: [133]u8,
+}
+
+Musig_Partial_Sig :: struct {
+	data: [36]u8,
+}
+
+/*
 Context creation flags.
 */
 FLAGS_TYPE_CONTEXT :: 1 << 0
@@ -92,6 +127,15 @@ FLAGS_BIT_COMPRESSION :: 1 << 8
 
 EC_COMPRESSED :: FLAGS_TYPE_COMPRESSION | FLAGS_BIT_COMPRESSION
 EC_UNCOMPRESSED :: FLAGS_TYPE_COMPRESSION
+
+/*
+Upstream's default BIP324 xdh hash function. It is a global *variable* holding a function
+pointer, not a procedure, so it is bound as one and passed through opaquely.
+*/
+@(link_prefix = "secp256k1_")
+foreign libsecp {
+	ellswift_xdh_hash_function_bip324: rawptr
+}
 
 @(default_calling_convention = "c", link_prefix = "secp256k1_")
 foreign libsecp {
@@ -138,6 +182,33 @@ foreign libsecp {
 	ellswift_encode :: proc(ctx: Context, ell64: ^u8, pubkey: ^Pubkey, rnd32: ^u8) -> c.int ---
 	ellswift_decode :: proc(ctx: Context, pubkey: ^Pubkey, ell64: ^u8) -> c.int ---
 	ellswift_create :: proc(ctx: Context, ell64: ^u8, seckey32: ^u8, auxrnd32: ^u8) -> c.int ---
+	ellswift_xdh :: proc(ctx: Context, output: ^u8, ell_a64: ^u8, ell_b64: ^u8, seckey32: ^u8, party: c.int, hashfp: rawptr, data: rawptr) -> c.int ---
 
 	tagged_sha256 :: proc(ctx: Context, hash32: ^u8, tag: ^u8, taglen: c.size_t, msg: ^u8, msglen: c.size_t) -> c.int ---
+
+	// MuSig2. Note `pubkeys` and `pubnonces` are arrays of *pointers* in C
+	// (`const secp256k1_pubkey * const *`), not arrays of structs — passing a flat array
+	// would read garbage, so callers build a pointer table.
+	//
+	// `session_secrand32` is non-const: upstream overwrites it to make accidental reuse of
+	// the same randomness harder.
+	musig_pubkey_agg :: proc(ctx: Context, agg_pk: ^Xonly_Pubkey, keyagg_cache: ^Musig_Keyagg_Cache, pubkeys: [^]^Pubkey, n_pubkeys: c.size_t) -> c.int ---
+	musig_pubkey_get :: proc(ctx: Context, agg_pk: ^Pubkey, keyagg_cache: ^Musig_Keyagg_Cache) -> c.int ---
+	musig_pubkey_ec_tweak_add :: proc(ctx: Context, output_pubkey: ^Pubkey, keyagg_cache: ^Musig_Keyagg_Cache, tweak32: ^u8) -> c.int ---
+	musig_pubkey_xonly_tweak_add :: proc(ctx: Context, output_pubkey: ^Pubkey, keyagg_cache: ^Musig_Keyagg_Cache, tweak32: ^u8) -> c.int ---
+
+	musig_nonce_gen :: proc(ctx: Context, secnonce: ^Musig_Secnonce, pubnonce: ^Musig_Pubnonce, session_secrand32: ^u8, seckey: ^u8, pubkey: ^Pubkey, msg32: ^u8, keyagg_cache: ^Musig_Keyagg_Cache, extra_input32: ^u8) -> c.int ---
+	musig_nonce_agg :: proc(ctx: Context, aggnonce: ^Musig_Aggnonce, pubnonces: [^]^Musig_Pubnonce, n_pubnonces: c.size_t) -> c.int ---
+	musig_nonce_process :: proc(ctx: Context, session: ^Musig_Session, aggnonce: ^Musig_Aggnonce, msg32: ^u8, keyagg_cache: ^Musig_Keyagg_Cache) -> c.int ---
+
+	musig_partial_sign :: proc(ctx: Context, partial_sig: ^Musig_Partial_Sig, secnonce: ^Musig_Secnonce, keypair: ^Keypair, keyagg_cache: ^Musig_Keyagg_Cache, session: ^Musig_Session) -> c.int ---
+	musig_partial_sig_verify :: proc(ctx: Context, partial_sig: ^Musig_Partial_Sig, pubnonce: ^Musig_Pubnonce, pubkey: ^Pubkey, keyagg_cache: ^Musig_Keyagg_Cache, session: ^Musig_Session) -> c.int ---
+	musig_partial_sig_agg :: proc(ctx: Context, sig64: ^u8, session: ^Musig_Session, partial_sigs: [^]^Musig_Partial_Sig, n_sigs: c.size_t) -> c.int ---
+
+	musig_pubnonce_parse :: proc(ctx: Context, nonce: ^Musig_Pubnonce, in66: ^u8) -> c.int ---
+	musig_pubnonce_serialize :: proc(ctx: Context, out66: ^u8, nonce: ^Musig_Pubnonce) -> c.int ---
+	musig_aggnonce_parse :: proc(ctx: Context, nonce: ^Musig_Aggnonce, in66: ^u8) -> c.int ---
+	musig_aggnonce_serialize :: proc(ctx: Context, out66: ^u8, nonce: ^Musig_Aggnonce) -> c.int ---
+	musig_partial_sig_parse :: proc(ctx: Context, sig: ^Musig_Partial_Sig, in32: ^u8) -> c.int ---
+	musig_partial_sig_serialize :: proc(ctx: Context, out32: ^u8, sig: ^Musig_Partial_Sig) -> c.int ---
 }

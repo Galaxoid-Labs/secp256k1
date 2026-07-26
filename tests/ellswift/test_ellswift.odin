@@ -245,16 +245,21 @@ test_ellswift_xdh_is_symmetric :: proc(t: ^testing.T) {
 			continue
 		}
 
-		// Alice is party true (her encoding is ell_a), Bob is party false.
+		// `party` says which side we are, matching upstream: false is party A, whose
+		// encoding is ell_a. Alice therefore passes false with her own key, Bob true with
+		// his. This test previously had the two the wrong way round, which is how it kept
+		// passing while the peer selection inside `xdh` was inverted — a symmetric self-test
+		// agrees with itself under either convention. The differential oracle is what
+		// distinguishes them.
 		sa, sb: [32]u8
-		testing.expectf(t, ellswift.xdh(sa[:], &ell_a, &ell_b, &a32, true), "xdh failed for a (%d)", i)
-		testing.expectf(t, ellswift.xdh(sb[:], &ell_a, &ell_b, &b32, false), "xdh failed for b (%d)", i)
+		testing.expectf(t, ellswift.xdh(sa[:], &ell_a, &ell_b, &a32, false), "xdh failed for a (%d)", i)
+		testing.expectf(t, ellswift.xdh(sb[:], &ell_a, &ell_b, &b32, true), "xdh failed for b (%d)", i)
 		testing.expectf(t, sa == sb, "ellswift XDH is not symmetric (%d)", i)
 
 		// Swapping the transcript order must change the secret: the encodings are hashed
 		// in the given order, so the binding is order-sensitive by design.
 		sc: [32]u8
-		ellswift.xdh(sc[:], &ell_b, &ell_a, &a32, false)
+		ellswift.xdh(sc[:], &ell_b, &ell_a, &a32, true)
 		testing.expectf(t, sc != sa, "transcript order did not affect the secret (%d)", i)
 
 		// A third party gets a different secret.

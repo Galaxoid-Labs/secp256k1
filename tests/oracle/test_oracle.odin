@@ -15,6 +15,7 @@ submodule consumer never builds them.
 */
 package test_oracle
 
+import "core:c"
 import "core:testing"
 import "../../ecdsa"
 import "../../ecdh"
@@ -476,5 +477,128 @@ test_oracle_tagged_hash :: proc(t: ^testing.T) {
 		oracle.tagged_sha256(f.c_ctx, &theirs[0], &tag[0], 16, &msg[0], 64)
 
 		testing.expectf(t, ours == theirs, "tagged hash mismatch at %d", i)
+	}
+}
+
+/*
+ellswift key creation and BIP324 x-only ECDH, against C.
+
+These two were the gap in ellswift coverage: only `decode` was compared, so `create` and
+`xdh` were unchecked against any external implementation. That mattered — `create`'s RNG
+framing had drifted from the specification (`seckey || zero32 [|| aux]`, where this
+implementation was substituting aux *for* the zeros rather than appending after them). The
+result was a perfectly valid encoding that no other implementation would reproduce, and
+nothing could see it, because an encoding verifies against itself either way.
+
+`create` is deterministic in (seckey, aux), so the comparison is exact.
+*/
+@(test)
+test_oracle_ellswift_create_xdh :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	rng: testutil.Rand
+	testutil.rand_seed(&rng, TEST_SEED + 0x5150)
+
+	for i in 0 ..< FUZZ_COUNT {
+		sk := random_seckey(t, &f, &rng)
+		aux: [32]u8
+		testutil.rand_bytes_test(&rng, aux[:])
+
+		// With auxiliary randomness.
+		ours: [64]u8
+		testing.expectf(t, ellswift.create(&f.gen, &ours, &sk, &aux), "our create failed at %d", i)
+
+		theirs: [64]u8
+		testing.expectf(
+			t,
+			oracle.ellswift_create(f.c_ctx, &theirs[0], &sk[0], &aux[0]) == 1,
+			"C create failed at %d",
+			i,
+		)
+		testing.expectf(
+			t,
+			ours == theirs,
+			"ellswift_create mismatch at %d (with aux)\n  ours   %x\n  theirs %x",
+			i,
+			ours,
+			theirs,
+		)
+
+		// And without, which takes the other branch of the framing.
+		ours_na: [64]u8
+		theirs_na: [64]u8
+		testing.expectf(t, ellswift.create(&f.gen, &ours_na, &sk, nil), "our create(nil) failed at %d", i)
+		testing.expectf(
+			t,
+			oracle.ellswift_create(f.c_ctx, &theirs_na[0], &sk[0], nil) == 1,
+			"C create(nil) failed at %d",
+			i,
+		)
+		testing.expectf(
+			t,
+			ours_na == theirs_na,
+			"ellswift_create mismatch at %d (no aux)\n  ours   %x\n  theirs %x",
+			i,
+			ours_na,
+			theirs_na,
+		)
+
+		// xdh in both party roles, against the same pair of encodings.
+		sk2 := random_seckey(t, &f, &rng)
+		shared_by_party: [2][32]u8
+		other: [64]u8
+		if !ellswift.create(&f.gen, &other, &sk2, nil) {
+			continue
+		}
+
+		// A real handshake: party A holds `sk` and encoding `ours`, party B holds `sk2` and
+		// encoding `other`. Each side supplies its own key with its own party flag.
+		for party in 0 ..< 2 {
+			p := party == 1
+			my_sk := p ? sk2 : sk
+
+			our_shared: [32]u8
+			ok := ellswift.xdh(our_shared[:], &ours, &other, &my_sk, p)
+
+			their_shared: [32]u8
+			cok := oracle.ellswift_xdh(
+				f.c_ctx,
+				&their_shared[0],
+				&ours[0],
+				&other[0],
+				&my_sk[0],
+				c.int(party),
+				oracle.ellswift_xdh_hash_function_bip324,
+				nil,
+			) == 1
+
+			testing.expectf(t, ok == cok, "xdh success disagrees at %d party %d", i, party)
+			if !ok {
+				continue
+			}
+			shared_by_party[party] = our_shared
+			testing.expectf(
+				t,
+				our_shared == their_shared,
+				"xdh shared secret mismatch at %d party %d\n  ours   %x\n  theirs %x",
+				i,
+				party,
+				our_shared,
+				their_shared,
+			)
+		}
+
+		// The point of the exchange: both parties must arrive at the same secret. This is
+		// what an inverted `party` breaks in the field while leaving a symmetric
+		// self-test perfectly happy.
+		testing.expectf(
+			t,
+			shared_by_party[0] == shared_by_party[1],
+			"the two parties derived different secrets at %d\n  A %x\n  B %x",
+			i,
+			shared_by_party[0],
+			shared_by_party[1],
+		)
 	}
 }

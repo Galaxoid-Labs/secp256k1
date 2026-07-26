@@ -28,6 +28,7 @@ because only the route differs, not the result.
 package ellswift
 
 import "core:mem"
+import "../ct"
 import "../ecmult"
 import "../field"
 import "../group"
@@ -107,9 +108,10 @@ xdh_hash_function_prefix :: proc "contextless" (
 /*
 Computes a BIP324 shared secret from both parties' ElligatorSwift encodings.
 
-`party` selects whose secret key is being supplied: true for the party whose encoding is
-`ell_a64`, false for the other. Both sides must pass the encodings in the same order, which
-is what makes the transcript binding symmetric.
+`party` says which side we are, matching upstream: false for party A, whose encoding is
+`ell_a64`, and true for party B, whose encoding is `ell_b64`. `seckey32` must be the secret
+key for *that* party. Both sides pass the encodings in the same order regardless, which is
+what makes the transcript binding symmetric.
 
 Returns false if the secret key is zero or at or above n. As in `ecdh`, the computation runs
 regardless with a substituted scalar, so an invalid key is not distinguishable by timing.
@@ -128,8 +130,12 @@ xdh :: proc "contextless" (
 		fn = xdh_hash_function_bip324
 	}
 
-	// Decode the peer's key. Public data, so variable-time is fine.
-	theirs := ell_b64 if party else ell_a64
+	// Decode the *peer's* key — the one that is not ours. `party` says which we are: false
+	// means we are party A, so our key is `ell_a64` and the peer's is `ell_b64`; true is the
+	// mirror. Getting this backwards still produces a shared secret, and two instances of
+	// this implementation talking to each other still agree, so nothing short of a
+	// cross-implementation comparison can see it. Public data, so variable-time is fine.
+	theirs := ell_a64 if party else ell_b64
 	u, tv: field.Field_Elem
 	ub := (^[32]u8)(&theirs[0])
 	tb := (^[32]u8)(&theirs[32])
@@ -143,7 +149,9 @@ xdh :: proc "contextless" (
 	// identical either way.
 	s: scalar.Scalar
 	overflow := scalar.scalar_set_b32(&s, seckey32)
-	overflow ||= scalar.scalar_is_zero(&s)
+	// Bitwise `|`, never `||`: short-circuiting would branch on whether the secret key
+	// overflowed.
+	overflow |= scalar.scalar_is_zero(&s)
 	scalar.scalar_cmov(&s, &scalar.ONE, overflow)
 
 	// Constant-time in the secret scalar.
@@ -164,7 +172,8 @@ xdh :: proc "contextless" (
 	group.ge_clear(&shared)
 	group.gej_clear(&res)
 
-	return ok && !overflow
+	// Bitwise `&`: `overflow` is secret-key-derived.
+	return ok & !overflow
 }
 
 /*
@@ -179,16 +188,22 @@ create :: proc "contextless" (
 	seckey32: ^[32]u8,
 	aux_rnd32: ^[32]u8 = nil,
 ) -> bool {
+	// Never branch on key validity; substitute a valid scalar and do identical work either
+	// way, folding the flag in at the end. Same structure as `eckey.pubkey_create`, and the
+	// same reason: the validity of a secret key is itself secret.
 	s: scalar.Scalar
-	if !scalar.scalar_set_b32_seckey(&s, seckey32) {
-		scalar.scalar_clear(&s)
-		return false
-	}
+	is_valid := scalar.scalar_set_b32_seckey(&s, seckey32)
+	scalar.scalar_cmov(&s, &scalar.ONE, !is_valid)
 
 	pj: group.Gej
 	ecmult.ecmult_gen(ctx, &pj, &s)
 	p: group.Ge
 	group.ge_set_gej(&p, &pj)
+
+	// The encoding of a public key is published on the wire, and the ElligatorSwift encoder
+	// below is deliberately variable-time in the point. Upstream declassifies here with the
+	// same note: "not constant time in produced pubkey".
+	ct.declassify(&p, size_of(p))
 
 	// The randomness is derived from the secret key and the optional aux input, so a
 	// caller with no entropy source still gets a usable encoding.
@@ -196,11 +211,22 @@ create :: proc "contextless" (
 	tag := "secp256k1_ellswift_create"
 	hash.sha256_initialize_tagged(&hasher, transmute([]u8)tag)
 	hash.sha256_write(&hasher, seckey32[:])
+
+	// The 32 zero bytes are unconditional, and the aux input is appended *after* them when
+	// present. Writing aux in place of the zeros instead would make the state for
+	// `create(sk, aux)` differ from upstream's for the same inputs, producing a valid but
+	// non-interoperable encoding — and nothing would have caught it, because the encoding
+	// verifies against itself either way. Upstream: H(privkey || "\x00"*32 [|| auxrnd32]).
+	zeros: [32]u8
+	hash.sha256_write(&hasher, zeros[:])
+
+	// The secret key is absorbed at this point, so the state is no longer secret and the
+	// variable-time encoder below may branch on values derived from it. Upstream
+	// declassifies here with the note "private key is hashed now".
+	ct.declassify(&hasher, size_of(hasher))
+
 	if aux_rnd32 != nil {
 		hash.sha256_write(&hasher, aux_rnd32[:])
-	} else {
-		zeros: [32]u8
-		hash.sha256_write(&hasher, zeros[:])
 	}
 
 	u_out := (^[32]u8)(&ell64[0])
@@ -215,5 +241,5 @@ create :: proc "contextless" (
 	scalar.scalar_clear(&s)
 	group.ge_clear(&p)
 	group.gej_clear(&pj)
-	return true
+	return is_valid
 }

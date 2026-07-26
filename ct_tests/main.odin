@@ -470,7 +470,15 @@ main :: proc() {
 	// Let the library declassify its own legitimate publication points. Without this the
 	// checker reports every one of them — the validity of an RFC6979 nonce, Schnorr's R,
 	// the success flag — and those reports bury real findings.
-	ct.set_hook(declassify)
+	//
+	// `set_hook` exists only when the declassify machinery is compiled in, so the call is
+	// guarded rather than assumed. The statistical timing mode does not enable it — it
+	// measures wall-clock time on real hardware and has no checker to inform — and an
+	// unguarded call made that build fail to compile at all, silently, because Odin does not
+	// type-check the untaken branch of a `when`.
+	when ct.DECLASSIFY_ENABLED {
+		ct.set_hook(declassify)
+	}
 
 	gen: ecmult.Ecmult_Gen_Context
 	ecmult.ecmult_gen_context_build(&gen)

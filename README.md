@@ -14,7 +14,7 @@ ECDSA, recovery, ECDH, extrakeys, Schnorr (BIP340), ellswift (BIP324) and MuSig2
 |---|---|
 | Test suite (release and `-debug`) | 107 pass |
 | Differential oracle vs libsecp256k1 | zero divergences, ARM64 and x86-64 |
-| Wycheproof ECDSA / ECDH | 463 / 752 pass |
+| Wycheproof ECDSA / ECDH | 463/463 and 752/752 — the complete corpora, none skipped |
 | BIP340 Schnorr, BIP327 MuSig2 | all vector groups pass |
 | Exhaustive small-curve (orders 7, 13, 199) | entire group enumerated |
 | Constant-time harness (valgrind) | 0 findings across 10 secret paths |
@@ -32,7 +32,7 @@ in [`TODO.md`](TODO.md) and [`TRUST.md`](TRUST.md).
 Consumed as a git submodule. Clone it so the directory is named `secp256k1`:
 
 ```sh
-git submodule add https://github.com/<you>/secp256k1 secp256k1
+git submodule add https://github.com/Galaxoid-Labs/secp256k1 secp256k1
 ```
 
 Odin resolves quoted imports relative to the importing file, so from `main.odin`:

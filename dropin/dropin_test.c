@@ -569,14 +569,19 @@ static void test_callbacks(void) {
 
     secp256k1_context_set_illegal_callback(ctx, on_illegal, &marker);
     /* A null pubkey out-pointer is a documented precondition violation. */
-    /* Deliberately illegal: a null out-pointer, to make the callback fire. Upstream's
-     * headers mark these arguments nonnull, so the nulls travel through volatile pointers —
-     * otherwise the compiler diagnoses the call it is the entire point of this test to make.
-     * The result is discarded because what is under test is the callback, not the return. */
+    /* Deliberately illegal: a null out-pointer, to make the callback fire.
+     *
+     * Two compiler defences have to be got past, and neither is optional. The nulls travel
+     * through volatile pointers because upstream's headers mark these arguments nonnull, so
+     * a literal NULL is diagnosed at the call this test exists to make. And the result is
+     * stored rather than cast to void, because the function is warn_unused_result and GCC —
+     * unlike clang — does not accept a (void) cast as acknowledgement. The stored value is
+     * then checked: an illegal argument must return 0. */
     {
         secp256k1_pubkey *volatile null_pk = NULL;
         const unsigned char *volatile null_sk = NULL;
-        (void)secp256k1_ec_pubkey_create(ctx, null_pk, null_sk);
+        int ret = secp256k1_ec_pubkey_create(ctx, null_pk, null_sk);
+        check("illegal argument returns 0", ret == 0);
     }
     check("illegal callback fired", callback_hits > 0);
     check("illegal callback data", callback_data_seen == &marker);

@@ -482,7 +482,17 @@ partial_sign :: proc "contextless" (
 	// and hands the secret key to anyone who sees the partial signature, so it must fail
 	// even when the bookkeeping says the nonce is usable. BIP327 requires the rejection and
 	// upstream enforces it in `musig_secnonce_load`.
-	if scalar.scalar_is_zero(&local.k[0]) || scalar.scalar_is_zero(&local.k[1]) {
+	//
+	// The predicate is computed first and then explicitly declassified, rather than branched
+	// on directly. Both are needed and for different reasons: `|` instead of `||` so the
+	// second limb is always examined — short-circuiting on the first is itself a branch on a
+	// secret — and the declassify because the resulting bit *is* legitimately public, since
+	// the caller learns it from the `false` returned below. Upstream declassifies the same
+	// bit in `musig_secnonce_load` with the same justification. Branching on the limbs
+	// without this is a genuine leak: valgrind reported exactly that here.
+	nonce_is_zero := scalar.scalar_is_zero(&local.k[0]) | scalar.scalar_is_zero(&local.k[1])
+	ct.declassify(&nonce_is_zero, size_of(nonce_is_zero))
+	if nonce_is_zero {
 		mem.zero_explicit(&local, size_of(Secnonce))
 		return false
 	}

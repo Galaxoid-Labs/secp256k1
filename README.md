@@ -45,6 +45,17 @@ import "secp256k1/field"    // low-level field arithmetic, if you want it
 Renaming the checkout changes the import path. To vendor it elsewhere use a collection:
 `odin build . -collection:lib=./third_party`, then `import "lib:secp256k1"`.
 
+One naming note: the `hash/` directory declares `package secp_hash`. Odin package names must be
+globally unique within a build and `core:hash` claims `hash`, so a consumer that links this
+library alongside anything reaching `core:hash` — `core:compress/gzip` and `core:compress/zlib`
+both do, which means most HTTP clients — would otherwise fail to compile. The import path is
+unchanged and internal call sites alias it back, so this only matters if you import `hash/`
+directly:
+
+```odin
+import hash "secp256k1/hash"   // alias, so call sites read hash.sha256_*
+```
+
 ## Layout
 
 Packages live at the repository root; there is no `src/`.

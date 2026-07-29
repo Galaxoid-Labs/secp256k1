@@ -31,7 +31,7 @@ import "core:mem"
 import "../ecmult"
 import "../field"
 import "../group"
-import "../hash"
+import hash "../hash"
 import "../scalar"
 
 /*

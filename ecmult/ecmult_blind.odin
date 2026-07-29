@@ -25,7 +25,7 @@ package ecmult
 import "core:mem"
 import "../field"
 import "../group"
-import "../hash"
+import hash "../hash"
 import "../scalar"
 
 /*

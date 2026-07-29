@@ -9,7 +9,7 @@ RFC 6979 A.2.5 for the nonce generator — reproduced unmodified, per `CLAUDE.md
 package test_hash
 
 import "core:testing"
-import "../../hash"
+import hash "../../hash"
 
 /*
 Parses a hex string into bytes.

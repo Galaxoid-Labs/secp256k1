@@ -49,7 +49,7 @@ import "../ecdsa"
 import "../ecmult"
 import "../ellswift"
 import "../group"
-import "../hash"
+import hash "../hash"
 import "../scalar"
 
 // ---------------------------------------------------------------------------------------

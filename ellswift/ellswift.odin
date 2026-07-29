@@ -33,7 +33,7 @@ package ellswift
 
 import "../field"
 import "../group"
-import "../hash"
+import hash "../hash"
 
 /*
 Constants derived from c0 = sqrt(-3):

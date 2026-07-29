@@ -46,7 +46,7 @@ import "../ecmult"
 import "../extrakeys"
 import "../field"
 import "../group"
-import "../hash"
+import hash "../hash"
 import "../scalar"
 
 /*

@@ -82,6 +82,14 @@ Applies to any path touching a secret key, nonce, or secret scalar:
   constants live in one place, config-swappable (see below). The name collision with the C
   library is prose-only — in code, our project is package `secp256k1` and the C reference is
   reached solely through the quarantined `oracle` package (below); they never mix.
+- **`hash/` declares `package secp_hash`, not `package hash`.** Odin requires package names to
+  be globally unique within a build, and `core:hash` claims that name. A consumer linking this
+  library alongside anything that reaches `core:hash` — `core:compress/gzip` and
+  `core:compress/zlib` both import it, so any HTTP client with transparent decompression does —
+  otherwise fails to compile with "Duplicate declaration of 'package hash'". The directory is
+  still `hash/` and importers alias it back (`import hash "../hash"`), so every call site still
+  reads `hash.sha256_*`. Do not rename it back; the collision is not hypothetical and was found
+  by a downstream consumer.
 - **Naming:** `Ada_Case` types (`Field_Elem`, `Scalar`, `Ge`, `Gej`), `snake_case` procs
   (`fe_normalize`, `scalar_mul`, `ge_add`).
 - **Errors:** enum error values + `or_return`. No panics in library paths; validation

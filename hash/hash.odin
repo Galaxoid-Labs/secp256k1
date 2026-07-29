@@ -14,7 +14,15 @@ drawing them from an RNG. That removes an entire class of catastrophic failure: 
 or predictable nonce reveals the private key outright. The generator is therefore held to
 the same standard as the signing code, not treated as a utility.
 */
-package hash
+// Named `secp_hash` rather than `hash` because Odin requires package names to be globally
+// unique within a build, and `core:hash` claims that name. Any binary linking this library
+// alongside something that reaches core:hash fails to compile with
+// "Duplicate declaration of 'package hash'" — `core:compress/gzip` and `core:compress/zlib`
+// both import it, so any HTTP client with transparent decompression pulls it in.
+//
+// Importers alias it back (`import hash "../hash"`), so call sites still read `hash.sha256_*`
+// and nothing outside this line changes.
+package secp_hash
 
 import "core:mem"
 

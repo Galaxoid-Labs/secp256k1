@@ -22,7 +22,7 @@ import "core:testing"
 import "../../ecdsa"
 import "../../eckey"
 import "../../group"
-import "../../hash"
+import hash "../../hash"
 
 /*
 Decodes a hex string of arbitrary length into a caller-supplied buffer.
